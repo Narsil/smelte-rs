@@ -8,6 +8,8 @@ edition = "2021"
 [dependencies]
 cblas-sys = { version = "0.1.4", default-features = false }
 libc = { version = "0.2", default-features = false }
+safetensors = { version = "0.3", optional = true}
 
 [features]
+default = ["safetensors"]
 intel-mkl = []

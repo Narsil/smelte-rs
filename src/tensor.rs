@@ -87,32 +87,42 @@ impl<'data> ViewTensor<'data> {
     }
 }
 
-// pub fn to_f32<'data>(view: &TensorView<'data>) -> Cow<'data, [f32]> {
-//     assert_eq!(view.dtype(), Dtype::F32);
-//     let v = view.data();
-//     if (v.as_ptr() as usize) % 4 == 0 {
-//         // SAFETY This is safe because we just checked that this
-//         // was correctly aligned.
-//         let data: &[f32] =
-//             unsafe { std::slice::from_raw_parts(v.as_ptr() as *const f32, v.len() / 4) };
-//         Cow::Borrowed(data)
-//     } else {
-//         let mut c = Vec::with_capacity(v.len() / 4);
-//         let mut i = 0;
-//         while i < v.len() {
-//             c.push(f32::from_le_bytes([v[i], v[i + 1], v[i + 2], v[i + 3]]));
-//             i += 4;
-//         }
-//         Cow::Owned(c)
-//     }
-// }
+#[cfg(feature = "safetensors")]
+mod safetensors {
+    use super::ViewTensor;
+    use safetensors::tensor::{Dtype, TensorView};
+    use std::borrow::Cow;
 
-// impl<'data> From<TensorView<'data>> for ViewTensor<'data> {
-//     fn from(view: TensorView<'data>) -> Self {
-//         let data = to_f32(&view);
-//         Self::new(data, view.shape().to_vec())
-//     }
-// }
+    pub fn to_f32<'data>(view: &TensorView<'data>) -> Cow<'data, [f32]> {
+        assert_eq!(view.dtype(), Dtype::F32);
+        let v = view.data();
+        if (v.as_ptr() as usize) % 4 == 0 {
+            // SAFETY This is safe because we just checked that this
+            // was correctly aligned.
+            let data: &[f32] =
+                unsafe { std::slice::from_raw_parts(v.as_ptr() as *const f32, v.len() / 4) };
+            Cow::Borrowed(data)
+        } else {
+            let mut c = Vec::with_capacity(v.len() / 4);
+            let mut i = 0;
+            while i < v.len() {
+                c.push(f32::from_le_bytes([v[i], v[i + 1], v[i + 2], v[i + 3]]));
+                i += 4;
+            }
+            Cow::Owned(c)
+        }
+    }
+
+    impl<'data> From<TensorView<'data>> for ViewTensor<'data> {
+        fn from(view: TensorView<'data>) -> Self {
+            let data = to_f32(&view);
+            Self {
+                data,
+                shape: view.shape().to_vec(),
+            }
+        }
+    }
+}
 
 /// Represent a new mutable tensor. Mostly useful during inference
 /// for creating intermediary representations or input to a model
