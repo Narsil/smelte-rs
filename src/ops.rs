@@ -5,26 +5,48 @@ use cblas_sys::{
     CblasRowMajor as RowMajor, CblasTrans as Tr,
 };
 
-#[inline]
-/// Equivalent to matmul(A, X) + B
-pub fn addmm<X: Tensor, A: Tensor, B: Tensor, TM: TensorMut>(x: &X, a: &A, b: &B, out: &mut TM) {
-    let m = x.shape()[0];
-    let k = x.shape()[1];
-    let n = a.shape()[1];
-    assert_eq!(k, a.shape()[0]);
-    assert_eq!(n, b.shape()[0]);
-    assert_eq!(out.shape(), &[m, n]);
-
-    matmul(x, a, out);
-    add(b, out);
+/// Potential errors when using the library
+#[derive(Debug)]
+pub enum SmeltError {
+    /// The operation could not succeed because the shapes are not valid.
+    DimensionMismatch {
+        /// The shape that we should have seen
+        expected: Vec<usize>,
+        /// The shape that we received
+        got: Vec<usize>,
+    },
+    /// The tensor given has insufficient rank (rank 2 means a tensor that has a shape of length 2)
+    InsufficientRank {
+        /// The minimum rank that we expect
+        minimum_rank: usize,
+    },
+    /// The tensor given has not the expected rank (rank 2 means a tensor that has a shape of length 2)
+    InvalidRank {
+        /// The rank that we expect
+        expected_rank: usize,
+    },
+    /// The tensor given has not enough room for the operations
+    VectorTooSmall {
+        /// The minimum size that we expect
+        minimum: usize,
+    },
 }
 
 /// Operation for selecting entire rows within tensor `weights`. Each `id` is the index
 /// of the row.
-pub fn select<T: Tensor, TM: TensorMut>(ids: &[u32], weights: &T, out: &mut TM) {
+pub fn select<T: Tensor, TM: TensorMut>(
+    ids: &[u32],
+    weights: &T,
+    out: &mut TM,
+) -> Result<(), SmeltError> {
     let hidden_dim = weights.shape()[1];
     let sequence_length = ids.len();
-    assert_eq!(out.shape(), [sequence_length, hidden_dim]);
+    if out.shape() != [sequence_length, hidden_dim] {
+        return Err(SmeltError::DimensionMismatch {
+            expected: vec![sequence_length, hidden_dim],
+            got: out.shape().to_vec(),
+        });
+    }
     for (i, id) in ids.iter().enumerate() {
         let id = *id as usize;
         let weight_offset = id * hidden_dim;
@@ -32,40 +54,79 @@ pub fn select<T: Tensor, TM: TensorMut>(ids: &[u32], weights: &T, out: &mut TM) 
         out.data_mut()[data_offset..data_offset + hidden_dim]
             .copy_from_slice(&weights.data()[weight_offset..weight_offset + hidden_dim]);
     }
+    Ok(())
 }
 
 /// Regular matrix multiplication
-pub fn matmul<A: Tensor, B: Tensor, TM: TensorMut>(a: &A, b: &B, c: &mut TM) {
+pub fn matmul<A: Tensor, B: Tensor, TM: TensorMut>(
+    a: &A,
+    b: &B,
+    c: &mut TM,
+) -> Result<(), SmeltError> {
     g_matmul::<false, A, B, TM>(a, b, c)
 }
 
 /// Matrix multiplication matmul(A, B.transposed())
-pub fn matmul_t<A: Tensor, B: Tensor, TM: TensorMut>(a: &A, b: &B, c: &mut TM) {
+pub fn matmul_t<A: Tensor, B: Tensor, TM: TensorMut>(
+    a: &A,
+    b: &B,
+    c: &mut TM,
+) -> Result<(), SmeltError> {
     g_matmul::<true, A, B, TM>(a, b, c)
 }
 
 #[inline]
-fn g_matmul<const TRANSPOSE: bool, A: Tensor, B: Tensor, TM: TensorMut>(a: &A, b: &B, c: &mut TM) {
+fn g_matmul<const TRANSPOSE: bool, A: Tensor, B: Tensor, TM: TensorMut>(
+    a: &A,
+    b: &B,
+    c: &mut TM,
+) -> Result<(), SmeltError> {
     let dim = a.shape().len();
-    assert!(dim >= 2);
-    assert_eq!(b.shape().len(), dim);
-    assert_eq!(c.shape().len(), dim);
-    assert_eq!(a.shape()[..dim - 2], b.shape()[..dim - 2]);
-    assert_eq!(a.shape()[..dim - 2], c.shape()[..dim - 2]);
+
+    if dim < 2 {
+        return Err(SmeltError::InsufficientRank { minimum_rank: 2 });
+    }
+    if b.shape().len() != dim {
+        return Err(SmeltError::InvalidRank { expected_rank: dim });
+    }
+    if c.shape().len() != dim {
+        return Err(SmeltError::InvalidRank { expected_rank: dim });
+    }
 
     let m = a.shape()[dim - 2];
     let k = a.shape()[dim - 1];
 
-    let n = if TRANSPOSE {
+    let mut expected_c = a.shape().to_vec();
+    let mut expected_b = a.shape().to_vec();
+
+    let (expected_b, n) = if TRANSPOSE {
         let n = b.shape()[dim - 2];
-        assert_eq!(k, b.shape()[dim - 1]);
-        n
+        expected_b[dim - 2] = n;
+        expected_b[dim - 1] = k;
+        (expected_b, n)
     } else {
         let n = b.shape()[dim - 1];
-        assert_eq!(k, b.shape()[dim - 2]);
-        n
+        expected_b[dim - 2] = k;
+        expected_b[dim - 1] = n;
+        (expected_b, n)
     };
-    assert_eq!(c.shape()[dim - 2..], vec![m, n]);
+
+    expected_c[dim - 2] = m;
+    expected_c[dim - 1] = n;
+
+    if expected_b != b.shape() {
+        return Err(SmeltError::DimensionMismatch {
+            expected: expected_b,
+            got: b.shape().to_vec(),
+        });
+    }
+
+    if expected_c != c.shape() {
+        return Err(SmeltError::DimensionMismatch {
+            expected: expected_c,
+            got: c.shape().to_vec(),
+        });
+    }
 
     let batching: usize = a.shape()[..dim - 2].iter().product();
     let a_skip: usize = m * k;
@@ -116,6 +177,7 @@ fn g_matmul<const TRANSPOSE: bool, A: Tensor, B: Tensor, TM: TensorMut>(a: &A, b
             )
         }
     });
+    Ok(())
 }
 
 /// tensor elementwise addition. b += a.
@@ -164,12 +226,23 @@ pub fn mul<T: Tensor, TM: TensorMut>(a: &T, b: &mut TM) {
 /// x = (x - x.mean()) / (x.var() + epsilon)
 /// `mean` and `var` do not have to be initialized, they are simply passed to
 /// avoid allocation.
-pub fn normalize<TM: TensorMut>(x: &mut TM, mean: &mut [f32], var: &mut [f32], epsilon: f32) {
-    assert_eq!(x.shape().len(), 2);
+pub fn normalize<TM: TensorMut>(
+    x: &mut TM,
+    mean: &mut [f32],
+    var: &mut [f32],
+    epsilon: f32,
+) -> Result<(), SmeltError> {
+    if x.shape().len() != 2 {
+        return Err(SmeltError::InvalidRank { expected_rank: 2 });
+    }
     let m = x.shape()[0];
     let size = x.shape()[1];
-    assert!(mean.len() >= m);
-    assert!(var.len() >= m);
+    if mean.len() < m {
+        return Err(SmeltError::VectorTooSmall { minimum: m });
+    }
+    if var.len() < m {
+        return Err(SmeltError::VectorTooSmall { minimum: m });
+    }
 
     let mut sum = 0.0;
     for (i, v) in x.data().iter().enumerate() {
@@ -195,6 +268,7 @@ pub fn normalize<TM: TensorMut>(x: &mut TM, mean: &mut [f32], var: &mut [f32], e
         .iter_mut()
         .enumerate()
         .for_each(|(i, v)| *v = (*v - mean[i / size]) / (var[i / size] + epsilon).sqrt());
+    Ok(())
 }
 
 #[inline]
@@ -202,13 +276,15 @@ fn g_softmax<const CAUSAL: bool, TM: TensorMut>(
     x: &mut TM,
     max: &mut [f32],
     past_sequence_length: usize,
-) {
+) -> Result<(), SmeltError> {
     let dim = x.shape().len();
 
     let m = x.shape()[dim - 2];
     let n = x.shape()[dim - 1];
     let b: usize = x.shape()[..dim - 2].iter().product();
-    assert!(max.len() >= b * m);
+    if max.len() < b * m {
+        return Err(SmeltError::VectorTooSmall { minimum: b * m });
+    }
     let mut current_max = f32::NEG_INFINITY;
     for (ii, &v) in x.data().iter().enumerate() {
         let i = ii / n;
@@ -255,23 +331,30 @@ fn g_softmax<const CAUSAL: bool, TM: TensorMut>(
             *v = 0.0;
         }
     });
+    Ok(())
 }
 
 /// Softmax on the last dimension for tensor `x`
-pub fn softmax<TM: TensorMut>(x: &mut TM, max: &mut [f32]) {
+pub fn softmax<TM: TensorMut>(x: &mut TM, max: &mut [f32]) -> Result<(), SmeltError> {
     g_softmax::<false, TM>(x, max, 0)
 }
 
 /// Causal softmax on the last dimension for tensor `x`. The causality is determined by the
 /// shape of `x` and `past_sequence_length` which defines how big is the missing part of the
 /// square.
-pub fn causal_softmax<TM: TensorMut>(x: &mut TM, max: &mut [f32], past_sequence_length: usize) {
+pub fn causal_softmax<TM: TensorMut>(
+    x: &mut TM,
+    max: &mut [f32],
+    past_sequence_length: usize,
+) -> Result<(), SmeltError> {
     g_softmax::<true, TM>(x, max, past_sequence_length)
 }
 
 /// Argmax of the last dimension of tensor `x `.
-pub fn special_argmax<T: Tensor>(x: &T) -> usize {
-    assert_eq!(x.shape().len(), 2);
+pub fn special_argmax<T: Tensor>(x: &T) -> Result<usize, SmeltError> {
+    if x.shape().len() != 2 {
+        return Err(SmeltError::InvalidRank { expected_rank: 2 });
+    }
     let n = x.shape()[0];
     let m = x.shape()[1];
 
@@ -283,20 +366,8 @@ pub fn special_argmax<T: Tensor>(x: &T) -> usize {
             max_id = i;
         }
     }
-    max_id
+    Ok(max_id)
 }
-
-// #[inline]
-// /// utility function to use a faster but less precise tanh
-// pub fn faster_tanh(x: f32) -> f32 {
-//     let x2 = x * x;
-//     let x3 = x2 * x;
-//     let x5 = x3 * x2;
-//
-//     let a = x + (0.16489087 * x3) + (0.00985468 * x5);
-//
-//     a / (1.0 + (a * a)).sqrt()
-// }
 
 /// `gelu` operation
 /// [https://en.wikipedia.org/wiki/Activation_function#Comparison_of_activation_functions]
@@ -318,79 +389,79 @@ mod tests {
     #[test]
     fn simple_matmul() {
         let data = vec![1.0, 2.0, 3.0, 4.0];
-        let a = OwnedTensor::new(data, vec![2, 2]);
+        let a = OwnedTensor::new(data, vec![2, 2]).unwrap();
         let data = [1.0, 2.0, 3.0, 4.0];
-        let b = ViewTensor::new(&data, vec![2, 2]);
+        let b = ViewTensor::new(&data, vec![2, 2]).unwrap();
         let data = vec![0.0; 4];
-        let mut c = OwnedTensor::new(data, vec![2, 2]);
+        let mut c = OwnedTensor::new(data, vec![2, 2]).unwrap();
 
-        matmul(&a, &b, &mut c);
+        matmul(&a, &b, &mut c).unwrap();
         assert_eq!(c.data(), &[7.0, 10.0, 15.0, 22.0]);
 
         let data = vec![1.0, 2.0];
-        let a = OwnedTensor::new(data, vec![2, 1]);
+        let a = OwnedTensor::new(data, vec![2, 1]).unwrap();
         let data = [3.0, 4.0];
-        let b = ViewTensor::new(&data, vec![1, 2]);
+        let b = ViewTensor::new(&data, vec![1, 2]).unwrap();
         let data = vec![0.0; 4];
-        let mut c = OwnedTensor::new(data, vec![2, 2]);
-        matmul(&a, &b, &mut c);
+        let mut c = OwnedTensor::new(data, vec![2, 2]).unwrap();
+        matmul(&a, &b, &mut c).unwrap();
         assert_eq!(c.data(), &[3.0, 4.0, 6.0, 8.0]);
 
         let data: Vec<_> = (0..6).map(|i| i as f32).collect();
-        let a = OwnedTensor::new(data, vec![2, 3]);
+        let a = OwnedTensor::new(data, vec![2, 3]).unwrap();
         let data: Vec<_> = (0..6).map(|i| (i + 2) as f32).collect();
-        let b = OwnedTensor::new(data, vec![3, 2]);
+        let b = OwnedTensor::new(data, vec![3, 2]).unwrap();
         let mut c = OwnedTensor::zeros(vec![2, 2]);
-        matmul(&a, &b, &mut c);
+        matmul(&a, &b, &mut c).unwrap();
         assert_eq!(c.data(), &[16., 19., 52., 64.]);
 
         let data: Vec<_> = (0..12).map(|i| i as f32).collect();
-        let a = OwnedTensor::new(data, vec![2, 2, 3]);
+        let a = OwnedTensor::new(data, vec![2, 2, 3]).unwrap();
         let data: Vec<_> = (0..12).map(|i| (i + 2) as f32).collect();
-        let b = OwnedTensor::new(data, vec![2, 3, 2]);
+        let b = OwnedTensor::new(data, vec![2, 3, 2]).unwrap();
         let mut c = OwnedTensor::zeros(vec![2, 2, 2]);
-        matmul(&a, &b, &mut c);
+        matmul(&a, &b, &mut c).unwrap();
         assert_eq!(c.data(), &[16., 19., 52., 64., 214., 235., 304., 334.]);
     }
 
     #[test]
     fn simple_matmul_t() {
-        let a = OwnedTensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
+        let a = OwnedTensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         // A.T
-        let b = ViewTensor::new(&[1.0, 3.0, 2.0, 4.0], vec![2, 2]);
+        let b = ViewTensor::new(&[1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
         let mut c = OwnedTensor::zeros(vec![2, 2]);
 
-        matmul_t(&a, &b, &mut c);
+        matmul_t(&a, &b, &mut c).unwrap();
         assert_eq!(c.data(), &[7.0, 10.0, 15.0, 22.0]);
 
-        let a = OwnedTensor::new(vec![1.0, 2.0], vec![2, 1]);
-        let b = ViewTensor::new(&[3.0, 4.0], vec![2, 1]);
+        let a = OwnedTensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
+        let b = ViewTensor::new(&[3.0, 4.0], vec![2, 1]).unwrap();
         let mut c = OwnedTensor::zeros(vec![2, 2]);
-        matmul_t(&a, &b, &mut c);
+        matmul_t(&a, &b, &mut c).unwrap();
         assert_eq!(c.data(), &[3.0, 4.0, 6.0, 8.0]);
 
         let data: Vec<_> = (0..6).map(|i| i as f32).collect();
-        let a = OwnedTensor::new(data, vec![2, 3]);
+        let a = OwnedTensor::new(data, vec![2, 3]).unwrap();
         let data: Vec<_> = (0..6).map(|i| (i + 2) as f32).collect();
-        let b = OwnedTensor::new(data, vec![2, 3]);
+        let b = OwnedTensor::new(data, vec![2, 3]).unwrap();
         let mut c = OwnedTensor::zeros(vec![2, 2]);
-        matmul_t(&a, &b, &mut c);
+        matmul_t(&a, &b, &mut c).unwrap();
         assert_eq!(c.data(), &[11., 20., 38., 74.]);
 
         let data: Vec<_> = (0..12).map(|i| i as f32).collect();
-        let a = OwnedTensor::new(data, vec![2, 2, 3]);
+        let a = OwnedTensor::new(data, vec![2, 2, 3]).unwrap();
         let data: Vec<_> = (0..12).map(|i| (i + 2) as f32).collect();
-        let b = OwnedTensor::new(data, vec![2, 2, 3]);
+        let b = OwnedTensor::new(data, vec![2, 2, 3]).unwrap();
         let mut c = OwnedTensor::zeros(vec![2, 2, 2]);
-        matmul_t(&a, &b, &mut c);
+        matmul_t(&a, &b, &mut c).unwrap();
         assert_eq!(c.data(), &[11., 20., 38., 74., 191., 254., 272., 362.]);
     }
 
     #[test]
     fn simple_softmax() {
-        let mut a = OwnedTensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
+        let mut a = OwnedTensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let mut max = vec![0.0; 2];
-        softmax(&mut a, &mut max);
+        softmax(&mut a, &mut max).unwrap();
         assert_eq!(
             simplify(a.data()),
             // Values obtained through python
@@ -400,18 +471,18 @@ mod tests {
 
     #[test]
     fn simple_causal_softmax() {
-        let mut a = OwnedTensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
+        let mut a = OwnedTensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         // Large enough for the second test
         let mut max = vec![0.0; 3 * 2];
-        causal_softmax(&mut a, &mut max, 0);
+        causal_softmax(&mut a, &mut max, 0).unwrap();
         assert_eq!(
             simplify(a.data()),
             // Values obtained through python
             [1.0000, 0.0000, 0.2689, 0.7311]
         );
 
-        let mut a = OwnedTensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
-        causal_softmax(&mut a, &mut max, 1);
+        let mut a = OwnedTensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+        causal_softmax(&mut a, &mut max, 1).unwrap();
         assert_eq!(
             simplify(a.data()),
             // Values obtained through python
@@ -419,8 +490,8 @@ mod tests {
         );
 
         let data: Vec<_> = (0..12).map(|i| (i + 1) as f32).collect();
-        let mut a = OwnedTensor::new(data, vec![3, 2, 2]);
-        causal_softmax(&mut a, &mut max, 0);
+        let mut a = OwnedTensor::new(data, vec![3, 2, 2]).unwrap();
+        causal_softmax(&mut a, &mut max, 0).unwrap();
         assert_eq!(
             simplify(a.data()),
             // Values obtained through python
@@ -431,8 +502,8 @@ mod tests {
         );
 
         let data: Vec<_> = (0..12).map(|i| (i + 1) as f32).collect();
-        let mut a = OwnedTensor::new(data, vec![2, 2, 3]);
-        causal_softmax(&mut a, &mut max, 1);
+        let mut a = OwnedTensor::new(data, vec![2, 2, 3]).unwrap();
+        causal_softmax(&mut a, &mut max, 1).unwrap();
         assert_eq!(
             simplify(a.data()),
             // Values obtained through python
@@ -445,9 +516,9 @@ mod tests {
 
     #[test]
     fn simple_select() {
-        let a = ViewTensor::new(&[1.0, 2.0, 3.0, 4.0], vec![2, 2]);
-        let mut tensor = OwnedTensor::new(vec![0.0; 6], vec![3, 2]);
-        select(&[1, 0, 0], &a, &mut tensor);
+        let a = ViewTensor::new(&[1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+        let mut tensor = OwnedTensor::new(vec![0.0; 6], vec![3, 2]).unwrap();
+        select(&[1, 0, 0], &a, &mut tensor).unwrap();
         assert_eq!(
             simplify(tensor.data()),
             // Values obtained through python

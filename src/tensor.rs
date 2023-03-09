@@ -1,22 +1,17 @@
 use std::borrow::Cow;
 
-// /// A special structure handy for Past Key values for text-generation
-// pub struct PastKeyValue {
-//     /// The cached key tensor. Shape is `NUM_HEADS, PAST_SEQUENCE_LENGTH, HEAD_DIM`.
-//     pub key: OwnedTensor,
-//     /// The cached value tensor. Shape is `NUM_HEADS, PAST_SEQUENCE_LENGTH, HEAD_DIM`.
-//     pub value: OwnedTensor,
-// }
-//
-// impl PastKeyValue {
-//     pub fn new(num_heads: usize, past_sequence_length: usize, head_dim: usize) -> Self {
-//         let key = OwnedTensor::new(vec![], vec![num_heads, past_sequence_length, head_dim]);
-//         let value = OwnedTensor::new(vec![], vec![num_heads, past_sequence_length, head_dim]);
-//         Self { key, value }
-//     }
-// }
-//
-// pub type PastKeyValues = Vec<PastKeyValue>;
+/// Error linked to the tensors themselves
+#[derive(Debug)]
+pub enum TensorError {
+    /// The arguments to the tensor creation are invalid, the shape doesn't match
+    /// the size of the buffer.
+    InvalidBuffer {
+        /// The size of the buffer sent
+        buffer_size: usize,
+        /// The shape of the tensor to create
+        shape: Vec<usize>,
+    },
+}
 
 /// Main tensor trait.
 /// Tensors are meant to be CPU only for now.
@@ -78,12 +73,17 @@ impl<'data> TensorMut for ViewTensor<'data> {
 
 impl<'data> ViewTensor<'data> {
     /// Instantiate a new view tensor
-    pub fn new(data: &'data [f32], shape: Vec<usize>) -> Self {
-        assert_eq!(data.len(), shape.iter().product::<usize>());
-        Self {
+    pub fn new(data: &'data [f32], shape: Vec<usize>) -> Result<Self, TensorError> {
+        if data.len() != shape.iter().product::<usize>() {
+            return Err(TensorError::InvalidBuffer {
+                buffer_size: data.len(),
+                shape,
+            });
+        }
+        Ok(Self {
             shape,
             data: data.into(),
-        }
+        })
     }
 }
 
@@ -158,8 +158,13 @@ impl TensorMut for OwnedTensor {
 }
 impl OwnedTensor {
     /// Create a new OwnedTensor
-    pub fn new(data: Vec<f32>, shape: Vec<usize>) -> Self {
-        assert_eq!(data.len(), shape.iter().product::<usize>());
-        Self { shape, data }
+    pub fn new(data: Vec<f32>, shape: Vec<usize>) -> Result<Self, TensorError> {
+        if data.len() != shape.iter().product::<usize>() {
+            return Err(TensorError::InvalidBuffer {
+                buffer_size: data.len(),
+                shape,
+            });
+        }
+        Ok(Self { shape, data })
     }
 }
