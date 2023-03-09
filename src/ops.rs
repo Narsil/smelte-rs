@@ -182,12 +182,13 @@ fn g_matmul<const TRANSPOSE: bool, A: Tensor, B: Tensor, TM: TensorMut>(
 
 /// tensor elementwise addition. b += a.
 /// a is automatically broadcasted.
-pub fn add<T: Tensor, TM: TensorMut>(a: &T, b: &mut TM) {
+pub fn add<T: Tensor, TM: TensorMut>(a: &T, b: &mut TM) -> Result<(), SmeltError> {
     if a.shape() == b.shape() {
         a.data()
             .iter()
             .zip(b.data_mut().iter_mut())
             .for_each(|(left, right)| *right += left);
+        Ok(())
     } else if &b.shape()[1..] == a.shape() {
         let n = b.shape()[0];
         (0..n).for_each(|i| {
@@ -196,19 +197,24 @@ pub fn add<T: Tensor, TM: TensorMut>(a: &T, b: &mut TM) {
                 .zip(b.data_mut().iter_mut().skip(i * a.shape()[0]))
                 .for_each(|(left, right)| *right += left);
         });
+        Ok(())
     } else {
-        todo!("add broadcast A {:?} B {:?}", a.shape(), b.shape());
+        Err(SmeltError::DimensionMismatch {
+            expected: b.shape().to_vec(),
+            got: a.shape().to_vec(),
+        })
     }
 }
 
 /// tensor elementwise multiplication. b *= a.
 /// a is automatically broadcasted.
-pub fn mul<T: Tensor, TM: TensorMut>(a: &T, b: &mut TM) {
+pub fn mul<T: Tensor, TM: TensorMut>(a: &T, b: &mut TM) -> Result<(), SmeltError> {
     if a.shape() == b.shape() {
         a.data()
             .iter()
             .zip(b.data_mut().iter_mut())
             .for_each(|(left, right)| *right *= left);
+        Ok(())
     } else if &b.shape()[1..] == a.shape() {
         let n = b.shape()[0];
         (0..n).for_each(|i| {
@@ -217,8 +223,12 @@ pub fn mul<T: Tensor, TM: TensorMut>(a: &T, b: &mut TM) {
                 .zip(b.data_mut().iter_mut().skip(i * a.shape()[0]))
                 .for_each(|(left, right)| *right *= left);
         });
+        Ok(())
     } else {
-        todo!("mul broadcast A {:?} B {:?}", a.shape(), b.shape());
+        Err(SmeltError::DimensionMismatch {
+            expected: b.shape().to_vec(),
+            got: a.shape().to_vec(),
+        })
     }
 }
 
