@@ -6,10 +6,13 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-cblas-sys = { version = "0.1.4", default-features = false }
+cblas-sys = { version = "0.1.4", default-features = false, optional = true }
+mkl-sys = { path = "../mkl-sys", optional = true }
 libc = { version = "0.2", default-features = false }
 safetensors = { version = "0.3", optional = true}
+rayon = {version = "1.7" }
+log = "0.4.17"
 
 [features]
 default = ["safetensors"]
-intel-mkl = []
+intel-mkl = ["dep:mkl-sys"]

@@ -1,8 +1,16 @@
 use crate::tensor::{Tensor, TensorMut};
+use rayon::prelude::*;
 
+#[cfg(feature = "cblas")]
 use cblas_sys::{
     cblas_sgemm as sgemm, CblasColMajor as ColMajor, CblasNoTrans as NoTr,
     CblasRowMajor as RowMajor, CblasTrans as Tr,
+};
+#[cfg(feature = "intel-mkl")]
+use mkl_sys::{
+    cblas_sgemm_batch_strided as sgemm_batch_strided, CBLAS_LAYOUT_CblasColMajor as ColMajor,
+    CBLAS_LAYOUT_CblasRowMajor as RowMajor, CBLAS_TRANSPOSE_CblasNoTrans as NoTr,
+    CBLAS_TRANSPOSE_CblasTrans as Tr,
 };
 
 /// Potential errors when using the library
@@ -143,40 +151,44 @@ fn g_matmul<const TRANSPOSE: bool, A: Tensor, B: Tensor, TM: TensorMut>(
     let cr = n as isize;
     let cc = 1;
 
-    (0..batching).for_each(|step| {
-        let ap = &a.data()[step * a_skip..];
-        let bp = &b.data()[step * b_skip..];
-        let cp = &mut c.data_mut()[step * c_skip..];
+    // (0..batching).for_each(|step| {
+    let ap = &a.data();
+    let bp = &b.data();
+    let cp = &mut c.data_mut();
 
-        unsafe {
-            let (m, n, k) = (m as libc::c_int, n as libc::c_int, k as libc::c_int);
-            let (layout, a_tr, b_tr, lda, ldb, ldc) = if cr < cc {
-                let (lda, a_tr) = if ar < ac { (m, NoTr) } else { (k, Tr) };
-                let (ldb, b_tr) = if br < bc { (k, NoTr) } else { (n, Tr) };
-                (ColMajor, a_tr, b_tr, lda, ldb, m)
-            } else {
-                let (lda, a_tr) = if ar < ac { (m, Tr) } else { (k, NoTr) };
-                let (ldb, b_tr) = if br < bc { (k, Tr) } else { (n, NoTr) };
-                (RowMajor, a_tr, b_tr, lda, ldb, n)
-            };
-            sgemm(
-                layout,
-                a_tr,
-                b_tr,
-                m,
-                n,
-                k,
-                1.0,
-                ap.as_ptr(),
-                lda,
-                bp.as_ptr(),
-                ldb,
-                1.0,
-                cp.as_mut_ptr(),
-                ldc,
-            )
-        }
-    });
+    unsafe {
+        let (m, n, k) = (m as libc::c_int, n as libc::c_int, k as libc::c_int);
+        let (layout, a_tr, b_tr, lda, ldb, ldc) = if cr < cc {
+            let (lda, a_tr) = if ar < ac { (m, NoTr) } else { (k, Tr) };
+            let (ldb, b_tr) = if br < bc { (k, NoTr) } else { (n, Tr) };
+            (ColMajor, a_tr, b_tr, lda, ldb, m)
+        } else {
+            let (lda, a_tr) = if ar < ac { (m, Tr) } else { (k, NoTr) };
+            let (ldb, b_tr) = if br < bc { (k, Tr) } else { (n, NoTr) };
+            (RowMajor, a_tr, b_tr, lda, ldb, n)
+        };
+        sgemm_batch_strided(
+            layout,
+            a_tr,
+            b_tr,
+            m,
+            n,
+            k,
+            1.0,
+            ap.as_ptr(),
+            lda,
+            a_skip as i32,
+            bp.as_ptr(),
+            ldb,
+            b_skip as i32,
+            1.0,
+            cp.as_mut_ptr(),
+            ldc,
+            c_skip as i32,
+            batching as i32,
+        )
+    }
+    // });
     Ok(())
 }
 
@@ -236,48 +248,18 @@ pub fn mul<T: Tensor, TM: TensorMut>(a: &T, b: &mut TM) -> Result<(), SmeltError
 /// x = (x - x.mean()) / (x.var() + epsilon)
 /// `mean` and `var` do not have to be initialized, they are simply passed to
 /// avoid allocation.
-pub fn normalize<TM: TensorMut>(
-    x: &mut TM,
-    mean: &mut [f32],
-    var: &mut [f32],
-    epsilon: f32,
-) -> Result<(), SmeltError> {
-    if x.shape().len() != 2 {
-        return Err(SmeltError::InvalidRank { expected_rank: 2 });
-    }
-    let m = x.shape()[0];
-    let size = x.shape()[1];
-    if mean.len() < m {
-        return Err(SmeltError::VectorTooSmall { minimum: m });
-    }
-    if var.len() < m {
-        return Err(SmeltError::VectorTooSmall { minimum: m });
-    }
-
-    let mut sum = 0.0;
-    for (i, v) in x.data().iter().enumerate() {
-        sum += v;
-        if (i + 1) % size == 0 {
-            let value = sum / size as f32;
-            mean[i / size] = value;
-            sum = 0.0;
-        }
-    }
-    sum = 0.0;
-    for (i, v) in x.data().iter().enumerate() {
-        let value = (v - mean[i / size]).powf(2.0);
-        sum += value;
-        if (i + 1) % size == 0 {
-            let value = sum / size as f32;
-            var[i / size] = value;
-            sum = 0.0;
-        }
-    }
-
-    x.data_mut()
-        .iter_mut()
-        .enumerate()
-        .for_each(|(i, v)| *v = (*v - mean[i / size]) / (var[i / size] + epsilon).sqrt());
+pub fn normalize<TM: TensorMut>(x: &mut TM, epsilon: f32) -> Result<(), SmeltError> {
+    let dim = x.shape().len();
+    let size = x.shape()[dim - 1];
+    x.data_mut().par_chunks_mut(size).for_each(|chunk| {
+        let sum: f32 = chunk.iter().sum();
+        let mean = sum / size as f32;
+        chunk.iter_mut().for_each(|v| *v -= mean);
+        let var: f32 = chunk.iter().map(|v| v.powf(2.0)).sum();
+        let var = var / size as f32;
+        let stddev: f32 = (var + epsilon).sqrt();
+        chunk.iter_mut().for_each(|v| *v /= stddev);
+    });
     Ok(())
 }
 
@@ -295,52 +277,36 @@ fn g_softmax<const CAUSAL: bool, TM: TensorMut>(
     if max.len() < b * m {
         return Err(SmeltError::VectorTooSmall { minimum: b * m });
     }
-    let mut current_max = f32::NEG_INFINITY;
-    for (ii, &v) in x.data().iter().enumerate() {
-        let i = ii / n;
-        let j = ii % n;
-        if (!CAUSAL || i + past_sequence_length >= j) && v > current_max {
-            current_max = v;
-        }
-        if (j + 1) % n == 0 {
-            max[ii / n] = current_max;
-            current_max = f32::NEG_INFINITY;
-        }
-    }
+
     x.data_mut()
-        .iter_mut()
+        .par_chunks_mut(n)
         .enumerate()
-        // Technically we're removing the max from the masked values.
-        // We don't care since this make this branchless and additions
-        // are super fast and we're going to reset the values to zero anyway
-        // at the end.
-        .for_each(|(ii, v)| *v -= max[ii / n]);
-    x.data_mut().iter_mut().for_each(|v| {
-        // TODO Is skipping the causal ops faster ?
-        *v = (*v).exp();
-    });
-    let softmax = max;
-    let mut sum = 0.0;
-    for (ii, v) in x.data().iter().enumerate() {
-        let i = (ii / n) % m;
-        let j = ii % n;
-        if !CAUSAL || i + past_sequence_length >= j {
-            sum += v;
-        }
-        if (j + 1) % n == 0 {
-            softmax[ii / n] = sum;
-            sum = 0.0;
-        }
-    }
-    x.data_mut().iter_mut().enumerate().for_each(|(ii, v)| {
-        let i = (ii / n) % m;
-        let j = ii % n;
-        if !CAUSAL || i + past_sequence_length >= j {
-            *v /= softmax[ii / n];
-        } else {
-            *v = 0.0;
-        }
-    });
+        .for_each(|(i, chunk)| {
+            let i = i % m;
+            let mut current_max = f32::NEG_INFINITY;
+            for (j, &v) in chunk.iter().enumerate() {
+                if (!CAUSAL || i + past_sequence_length >= j) && v > current_max {
+                    current_max = v;
+                }
+            }
+            for v in chunk.iter_mut() {
+                *v -= current_max;
+                *v = (*v).exp();
+            }
+            let mut sum = 0.0;
+            for (j, &v) in chunk.iter().enumerate() {
+                if !CAUSAL || i + past_sequence_length >= j {
+                    sum += v;
+                }
+            }
+            for (j, v) in chunk.iter_mut().enumerate() {
+                if !CAUSAL || i + past_sequence_length >= j {
+                    *v /= sum;
+                } else {
+                    *v = 0.0;
+                }
+            }
+        });
     Ok(())
 }
 
@@ -379,15 +345,40 @@ pub fn special_argmax<T: Tensor>(x: &T) -> Result<usize, SmeltError> {
     Ok(max_id)
 }
 
+/// utility function to use a faster but less precise tanh
+pub fn faster_tanh(x: f32) -> f32 {
+    let x2 = x * x;
+    let x3 = x2 * x;
+    let x5 = x3 * x2;
+
+    let a = x + (0.16489087 * x3) + (0.00985468 * x5);
+
+    a / (1.0 + (a * a)).sqrt()
+}
+
 /// `gelu` operation
-/// [https://en.wikipedia.org/wiki/Activation_function#Comparison_of_activation_functions]
-pub fn gelu<T: TensorMut>(x: &mut T) {
-    x.data_mut().iter_mut().for_each(|v| {
-        *v = 0.5
-            * (*v)
-            * (1.0
-                + f32::tanh((2.0f32 / std::f32::consts::PI).sqrt() * (*v + 0.044715 * v.powf(3.0))))
-    });
+/// <https://en.wikipedia.org/wiki/Activation_function#Comparison_of_activation_functions>
+/// but using [faster_tanh]
+pub fn faster_gelu(v: f32) -> f32 {
+    0.5 * (v)
+        * (1.0 + faster_tanh((2.0f32 / std::f32::consts::PI).sqrt() * (v + 0.044715 * v.powf(3.0))))
+}
+
+/// `gelu` operation
+/// <https://en.wikipedia.org/wiki/Activation_function#Comparison_of_activation_functions>
+pub fn gelu(v: f32) -> f32 {
+    0.5 * (v)
+        * (1.0 + f32::tanh((2.0f32 / std::f32::consts::PI).sqrt() * v * (1.0 + 0.044715 * v * v)))
+}
+
+/// Applies `func` to every item of the tensor
+pub fn par_apply<T: TensorMut, F: Fn(f32) -> f32 + Sync>(x: &mut T, func: F) {
+    x.data_mut().par_iter_mut().for_each(|v| *v = func(*v));
+}
+
+/// Applies `func` to every item of the tensor
+pub fn apply<T: TensorMut, F: Fn(f32) -> f32 + Sync>(x: &mut T, func: F) {
+    x.data_mut().iter_mut().for_each(|v| *v = func(*v));
 }
 
 #[cfg(test)]
@@ -533,6 +524,18 @@ mod tests {
             simplify(tensor.data()),
             // Values obtained through python
             [3.0, 4.0, 1.0, 2.0, 1.0, 2.0]
+        );
+    }
+
+    #[test]
+    fn simple_normalize() {
+        let mut a = OwnedTensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+        let epsilon = 1e-5;
+        normalize(&mut a, epsilon).unwrap();
+        assert_eq!(
+            simplify(a.data()),
+            // Values obtained through python
+            [-1.0, 1.0, -1.0, 1.0]
         );
     }
 }
