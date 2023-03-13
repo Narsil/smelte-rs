@@ -1,16 +1,8 @@
 use crate::tensor::{Tensor, TensorMut};
-use rayon::prelude::*;
 
-#[cfg(feature = "cblas")]
 use cblas_sys::{
     cblas_sgemm as sgemm, CblasColMajor as ColMajor, CblasNoTrans as NoTr,
     CblasRowMajor as RowMajor, CblasTrans as Tr,
-};
-#[cfg(feature = "intel-mkl")]
-use mkl_sys::{
-    cblas_sgemm_batch_strided as sgemm_batch_strided, CBLAS_LAYOUT_CblasColMajor as ColMajor,
-    CBLAS_LAYOUT_CblasRowMajor as RowMajor, CBLAS_TRANSPOSE_CblasNoTrans as NoTr,
-    CBLAS_TRANSPOSE_CblasTrans as Tr,
 };
 
 /// Potential errors when using the library
@@ -151,44 +143,44 @@ fn g_matmul<const TRANSPOSE: bool, A: Tensor, B: Tensor, TM: TensorMut>(
     let cr = n as isize;
     let cc = 1;
 
-    // (0..batching).for_each(|step| {
-    let ap = &a.data();
-    let bp = &b.data();
-    let cp = &mut c.data_mut();
+    (0..batching).for_each(|step| {
+        let ap = &a.data()[step * a_skip..];
+        let bp = &b.data()[step * b_skip..];
+        let cp = &mut c.data_mut()[step * c_skip..];
 
-    unsafe {
-        let (m, n, k) = (m as libc::c_int, n as libc::c_int, k as libc::c_int);
-        let (layout, a_tr, b_tr, lda, ldb, ldc) = if cr < cc {
-            let (lda, a_tr) = if ar < ac { (m, NoTr) } else { (k, Tr) };
-            let (ldb, b_tr) = if br < bc { (k, NoTr) } else { (n, Tr) };
-            (ColMajor, a_tr, b_tr, lda, ldb, m)
-        } else {
-            let (lda, a_tr) = if ar < ac { (m, Tr) } else { (k, NoTr) };
-            let (ldb, b_tr) = if br < bc { (k, Tr) } else { (n, NoTr) };
-            (RowMajor, a_tr, b_tr, lda, ldb, n)
-        };
-        sgemm_batch_strided(
-            layout,
-            a_tr,
-            b_tr,
-            m,
-            n,
-            k,
-            1.0,
-            ap.as_ptr(),
-            lda,
-            a_skip as i32,
-            bp.as_ptr(),
-            ldb,
-            b_skip as i32,
-            1.0,
-            cp.as_mut_ptr(),
-            ldc,
-            c_skip as i32,
-            batching as i32,
-        )
-    }
-    // });
+        unsafe {
+            let (m, n, k) = (m as libc::c_int, n as libc::c_int, k as libc::c_int);
+            let (layout, a_tr, b_tr, lda, ldb, ldc) = if cr < cc {
+                let (lda, a_tr) = if ar < ac { (m, NoTr) } else { (k, Tr) };
+                let (ldb, b_tr) = if br < bc { (k, NoTr) } else { (n, Tr) };
+                (ColMajor, a_tr, b_tr, lda, ldb, m)
+            } else {
+                let (lda, a_tr) = if ar < ac { (m, Tr) } else { (k, NoTr) };
+                let (ldb, b_tr) = if br < bc { (k, Tr) } else { (n, NoTr) };
+                (RowMajor, a_tr, b_tr, lda, ldb, n)
+            };
+            sgemm(
+                layout,
+                a_tr,
+                b_tr,
+                m,
+                n,
+                k,
+                1.0,
+                ap.as_ptr(),
+                lda,
+                // a_skip as i32,
+                bp.as_ptr(),
+                ldb,
+                // b_skip as i32,
+                1.0,
+                cp.as_mut_ptr(),
+                ldc,
+                // c_skip as i32,
+                // batching as i32,
+            )
+        }
+    });
     Ok(())
 }
 
@@ -251,7 +243,7 @@ pub fn mul<T: Tensor, TM: TensorMut>(a: &T, b: &mut TM) -> Result<(), SmeltError
 pub fn normalize<TM: TensorMut>(x: &mut TM, epsilon: f32) -> Result<(), SmeltError> {
     let dim = x.shape().len();
     let size = x.shape()[dim - 1];
-    x.data_mut().par_chunks_mut(size).for_each(|chunk| {
+    x.data_mut().chunks_mut(size).for_each(|chunk| {
         let sum: f32 = chunk.iter().sum();
         let mean = sum / size as f32;
         chunk.iter_mut().for_each(|v| *v -= mean);
@@ -266,20 +258,15 @@ pub fn normalize<TM: TensorMut>(x: &mut TM, epsilon: f32) -> Result<(), SmeltErr
 #[inline]
 fn g_softmax<const CAUSAL: bool, TM: TensorMut>(
     x: &mut TM,
-    max: &mut [f32],
     past_sequence_length: usize,
 ) -> Result<(), SmeltError> {
     let dim = x.shape().len();
 
     let m = x.shape()[dim - 2];
     let n = x.shape()[dim - 1];
-    let b: usize = x.shape()[..dim - 2].iter().product();
-    if max.len() < b * m {
-        return Err(SmeltError::VectorTooSmall { minimum: b * m });
-    }
 
     x.data_mut()
-        .par_chunks_mut(n)
+        .chunks_mut(n)
         .enumerate()
         .for_each(|(i, chunk)| {
             let i = i % m;
@@ -311,8 +298,8 @@ fn g_softmax<const CAUSAL: bool, TM: TensorMut>(
 }
 
 /// Softmax on the last dimension for tensor `x`
-pub fn softmax<TM: TensorMut>(x: &mut TM, max: &mut [f32]) -> Result<(), SmeltError> {
-    g_softmax::<false, TM>(x, max, 0)
+pub fn softmax<TM: TensorMut>(x: &mut TM) -> Result<(), SmeltError> {
+    g_softmax::<false, TM>(x, 0)
 }
 
 /// Causal softmax on the last dimension for tensor `x`. The causality is determined by the
@@ -320,10 +307,9 @@ pub fn softmax<TM: TensorMut>(x: &mut TM, max: &mut [f32]) -> Result<(), SmeltEr
 /// square.
 pub fn causal_softmax<TM: TensorMut>(
     x: &mut TM,
-    max: &mut [f32],
     past_sequence_length: usize,
 ) -> Result<(), SmeltError> {
-    g_softmax::<true, TM>(x, max, past_sequence_length)
+    g_softmax::<true, TM>(x, past_sequence_length)
 }
 
 /// Argmax of the last dimension of tensor `x `.
@@ -356,24 +342,27 @@ pub fn faster_tanh(x: f32) -> f32 {
     a / (1.0 + (a * a)).sqrt()
 }
 
+/// utility function to use a faster but less precise tanh
+#[inline]
+pub fn inline_tanh(x: f32) -> f32 {
+    1.0 - (2.0 / (1.0 + (2.0 * x).exp()))
+}
+
 /// `gelu` operation
 /// <https://en.wikipedia.org/wiki/Activation_function#Comparison_of_activation_functions>
 /// but using [faster_tanh]
+#[inline]
 pub fn faster_gelu(v: f32) -> f32 {
     0.5 * (v)
-        * (1.0 + faster_tanh((2.0f32 / std::f32::consts::PI).sqrt() * (v + 0.044715 * v.powf(3.0))))
+        * (1.0 + faster_tanh((2.0f32 / std::f32::consts::PI).sqrt() * v * (1.0 + 0.044715 * v * v)))
 }
 
 /// `gelu` operation
 /// <https://en.wikipedia.org/wiki/Activation_function#Comparison_of_activation_functions>
+#[inline]
 pub fn gelu(v: f32) -> f32 {
     0.5 * (v)
         * (1.0 + f32::tanh((2.0f32 / std::f32::consts::PI).sqrt() * v * (1.0 + 0.044715 * v * v)))
-}
-
-/// Applies `func` to every item of the tensor
-pub fn par_apply<T: TensorMut, F: Fn(f32) -> f32 + Sync>(x: &mut T, func: F) {
-    x.data_mut().par_iter_mut().for_each(|v| *v = func(*v));
 }
 
 /// Applies `func` to every item of the tensor
@@ -461,8 +450,7 @@ mod tests {
     #[test]
     fn simple_softmax() {
         let mut a = OwnedTensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-        let mut max = vec![0.0; 2];
-        softmax(&mut a, &mut max).unwrap();
+        softmax(&mut a).unwrap();
         assert_eq!(
             simplify(a.data()),
             // Values obtained through python
@@ -474,8 +462,7 @@ mod tests {
     fn simple_causal_softmax() {
         let mut a = OwnedTensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         // Large enough for the second test
-        let mut max = vec![0.0; 3 * 2];
-        causal_softmax(&mut a, &mut max, 0).unwrap();
+        causal_softmax(&mut a, 0).unwrap();
         assert_eq!(
             simplify(a.data()),
             // Values obtained through python
@@ -483,7 +470,7 @@ mod tests {
         );
 
         let mut a = OwnedTensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-        causal_softmax(&mut a, &mut max, 1).unwrap();
+        causal_softmax(&mut a, 1).unwrap();
         assert_eq!(
             simplify(a.data()),
             // Values obtained through python
@@ -492,7 +479,7 @@ mod tests {
 
         let data: Vec<_> = (0..12).map(|i| (i + 1) as f32).collect();
         let mut a = OwnedTensor::new(data, vec![3, 2, 2]).unwrap();
-        causal_softmax(&mut a, &mut max, 0).unwrap();
+        causal_softmax(&mut a, 0).unwrap();
         assert_eq!(
             simplify(a.data()),
             // Values obtained through python
@@ -504,7 +491,7 @@ mod tests {
 
         let data: Vec<_> = (0..12).map(|i| (i + 1) as f32).collect();
         let mut a = OwnedTensor::new(data, vec![2, 2, 3]).unwrap();
-        causal_softmax(&mut a, &mut max, 1).unwrap();
+        causal_softmax(&mut a, 1).unwrap();
         assert_eq!(
             simplify(a.data()),
             // Values obtained through python

@@ -126,85 +126,85 @@ fn main() -> Result<(), BuildError> {
     #[cfg(not(feature = "intel-mkl"))]
     println!("cargo:rustc-link-lib=dylib=cblas");
 
-    // #[cfg(feature = "intel-mkl")]
-    // {
-    //     let root = std::env::var("ONEAPI_ROOT").unwrap_or_else(|_| DEFAULT_ONEAPI_ROOT.to_string());
-    //     println!("Using '{root}' as ONEAPI_ROOT");
+    #[cfg(feature = "intel-mkl")]
+    {
+        let root = std::env::var("ONEAPI_ROOT").unwrap_or_else(|_| DEFAULT_ONEAPI_ROOT.to_string());
+        println!("Using '{root}' as ONEAPI_ROOT");
 
-    //     let path = match std::env::var(LD_DIR) {
-    //         Ok(path) => path,
-    //         Err(e) => {
-    //             // On macOS it's unusual to set $DYLD_LIBRARY_PATH, so we want to provide a helpful message
-    //             println!(
-    //                 "Library path env variable '{LD_DIR}' was not found. Run `{}`",
-    //                 suggest_setvars_cmd(&root)
-    //             );
-    //             return Err(BuildError::PathNotFound(e));
-    //         }
-    //     };
+        let path = match std::env::var(LD_DIR) {
+            Ok(path) => path,
+            Err(e) => {
+                // On macOS it's unusual to set $DYLD_LIBRARY_PATH, so we want to provide a helpful message
+                println!(
+                    "Library path env variable '{LD_DIR}' was not found. Run `{}`",
+                    suggest_setvars_cmd(&root)
+                );
+                return Err(BuildError::PathNotFound(e));
+            }
+        };
 
-    //     if library == Library::Dynamic {
-    //         // check to make sure that things in `SHARED_LIB_DIRS` are in `$LD_DIR`.
-    //         let path = path.replace('\\', "/");
-    //         for shared_lib_dir in SHARED_LIB_DIRS {
-    //             println!("cargo:rerun-if-env-changed=MKL_VERSION");
-    //             let mkl_version =
-    //                 std::env::var("MKL_VERSION").unwrap_or_else(|_| "2022.1.0".to_string());
-    //             let versioned_dir = shared_lib_dir.replace("latest", &mkl_version);
+        if library == Library::Dynamic {
+            // check to make sure that things in `SHARED_LIB_DIRS` are in `$LD_DIR`.
+            let path = path.replace('\\', "/");
+            for shared_lib_dir in SHARED_LIB_DIRS {
+                println!("cargo:rerun-if-env-changed=MKL_VERSION");
+                let mkl_version =
+                    std::env::var("MKL_VERSION").unwrap_or_else(|_| "2023.0.0".to_string());
+                let versioned_dir = shared_lib_dir.replace("latest", &mkl_version);
 
-    //             println!("Checking that '{shared_lib_dir}' or '{versioned_dir}' is in {LD_DIR}");
-    //             if !path.contains(shared_lib_dir) && !path.contains(&versioned_dir) {
-    //                 println!(
-    //                     "'{shared_lib_dir}' not found in library path. Run `{}`",
-    //                     suggest_setvars_cmd(&root)
-    //                 );
-    //                 return Err(BuildError::AddSharedLibDirToPath(
-    //                     shared_lib_dir.to_string(),
-    //                 ));
-    //             }
-    //         }
-    //     }
+                println!("Checking that '{shared_lib_dir}' or '{versioned_dir}' is in {LD_DIR}");
+                if !path.contains(shared_lib_dir) && !path.contains(&versioned_dir) {
+                    println!(
+                        "'{shared_lib_dir}' not found in library path. Run `{}`",
+                        suggest_setvars_cmd(&root)
+                    );
+                    return Err(BuildError::AddSharedLibDirToPath(
+                        shared_lib_dir.to_string(),
+                    ));
+                }
+            }
+        }
 
-    //     let root: std::path::PathBuf = root.into();
+        let root: std::path::PathBuf = root.into();
 
-    //     if !root.exists() {
-    //         return Err(BuildError::OneAPINotFound(root));
-    //     }
-    //     if !root.is_dir() {
-    //         return Err(BuildError::OneAPINotADir(root));
-    //     }
+        if !root.exists() {
+            return Err(BuildError::OneAPINotFound(root));
+        }
+        if !root.is_dir() {
+            return Err(BuildError::OneAPINotADir(root));
+        }
 
-    //     for rel_lib_dir in LINK_DIRS {
-    //         let lib_dir = root.join(rel_lib_dir);
-    //         println!("cargo:rustc-link-search={}", lib_dir.display());
-    //     }
+        for rel_lib_dir in LINK_DIRS {
+            let lib_dir = root.join(rel_lib_dir);
+            println!("cargo:rustc-link-search={}", lib_dir.display());
+        }
 
-    //     let lib_postfix: &str = if cfg!(windows) && library == Library::Static {
-    //         "_dll"
-    //     } else {
-    //         ""
-    //     };
+        let lib_postfix: &str = if cfg!(windows) && library == Library::Static {
+            "_dll"
+        } else {
+            ""
+        };
 
-    //     println!("cargo:rustc-link-lib={link_type}={MKL_INTERFACE}{lib_postfix}");
-    //     println!("cargo:rustc-link-lib={link_type}={MKL_THREAD}{lib_postfix}");
-    //     println!("cargo:rustc-link-lib={link_type}={MKL_CORE}{lib_postfix}");
-    //     if THREADED {
-    //         println!("cargo:rustc-link-lib=dylib={THREADING_LIB}");
-    //     }
+        println!("cargo:rustc-link-lib={link_type}={MKL_INTERFACE}{lib_postfix}");
+        println!("cargo:rustc-link-lib={link_type}={MKL_THREAD}{lib_postfix}");
+        println!("cargo:rustc-link-lib={link_type}={MKL_CORE}{lib_postfix}");
+        if THREADED {
+            println!("cargo:rustc-link-lib=dylib={THREADING_LIB}");
+        }
 
-    //     if !cfg!(windows) {
-    //         println!("cargo:rustc-link-lib=pthread");
-    //         println!("cargo:rustc-link-lib=m");
-    //         println!("cargo:rustc-link-lib=dl");
-    //     }
+        if !cfg!(windows) {
+            println!("cargo:rustc-link-lib=pthread");
+            println!("cargo:rustc-link-lib=m");
+            println!("cargo:rustc-link-lib=dl");
+        }
 
-    //     #[cfg(target_os = "macos")]
-    //     {
-    //         println!(
-    //             "cargo:rustc-link-arg=-Wl,-rpath,{}/{MACOS_COMPILER_PATH}",
-    //             root.display(),
-    //         );
-    //     }
-    // }
+        #[cfg(target_os = "macos")]
+        {
+            println!(
+                "cargo:rustc-link-arg=-Wl,-rpath,{}/{MACOS_COMPILER_PATH}",
+                root.display(),
+            );
+        }
+    }
     Ok(())
 }
