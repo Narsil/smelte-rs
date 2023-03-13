@@ -362,7 +362,7 @@ pub fn faster_gelu(v: f32) -> f32 {
 #[inline]
 pub fn gelu(v: f32) -> f32 {
     0.5 * (v)
-        * (1.0 + f32::tanh((2.0f32 / std::f32::consts::PI).sqrt() * v * (1.0 + 0.044715 * v * v)))
+        * (1.0 + inline_tanh((2.0f32 / std::f32::consts::PI).sqrt() * v * (1.0 + 0.044715 * v * v)))
 }
 
 /// Applies `func` to every item of the tensor
