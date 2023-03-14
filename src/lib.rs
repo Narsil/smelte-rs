@@ -10,7 +10,7 @@ pub mod nn;
 /// The traits for generic implementations
 pub mod traits;
 
-/// Error linked to the tensors themselves
+/// Error linked to the tensor creation
 #[derive(Debug)]
 pub enum TensorError {
     /// The arguments to the tensor creation are invalid, the shape doesn't match
@@ -47,6 +47,14 @@ pub enum SmeltError {
     VectorTooSmall {
         /// The minimum size that we expect
         minimum: usize,
+    },
+
+    /// The select operation attempted to select out of the tensor
+    OutOfVocabulary {
+        /// The vocabulary size
+        vocab_size: usize,
+        /// culprit id
+        id: usize,
     },
 }
 

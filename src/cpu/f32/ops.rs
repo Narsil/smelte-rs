@@ -8,50 +8,45 @@ use cblas_sys::{
 
 /// Operation for selecting entire rows within tensor `weights`. Each `id` is the index
 /// of the row.
-pub fn select(ids: &[u32], weights: &Tensor, out: &mut Tensor) -> Result<(), SmeltError> {
-    let hidden_dim = weights.shape()[1];
+pub fn select<'a>(ids: &[u32], weights: &Tensor<'a>) -> Result<Tensor<'a>, SmeltError> {
     let sequence_length = ids.len();
-    if out.shape() != [sequence_length, hidden_dim] {
-        return Err(SmeltError::DimensionMismatch {
-            expected: vec![sequence_length, hidden_dim],
-            got: out.shape().to_vec(),
-        });
-    }
+    let vocab_size = weights.shape()[0];
+    let hidden_dim = weights.shape()[1];
+    let mut out = Tensor::zeros(vec![sequence_length, hidden_dim]);
     for (i, id) in ids.iter().enumerate() {
         let id = *id as usize;
+        if id >= vocab_size {
+            return Err(SmeltError::OutOfVocabulary { vocab_size, id });
+        }
         let weight_offset = id * hidden_dim;
         let data_offset = i * hidden_dim;
         out.data_mut()[data_offset..data_offset + hidden_dim]
             .copy_from_slice(&weights.data()[weight_offset..weight_offset + hidden_dim]);
     }
-    Ok(())
+    Ok(out)
 }
 
 /// Regular matrix multiplication
-pub fn matmul(a: &Tensor, b: &Tensor, c: &mut Tensor) -> Result<(), SmeltError> {
-    g_matmul::<false>(a, b, c)
+pub fn matmul<'a>(a: &Tensor<'a>, b: &Tensor<'a>) -> Result<Tensor<'a>, SmeltError> {
+    g_matmul::<false>(a, b)
 }
 
 /// Matrix multiplication matmul(A, B.transposed())
-pub fn matmul_t(a: &Tensor, b: &Tensor, c: &mut Tensor) -> Result<(), SmeltError> {
-    g_matmul::<true>(a, b, c)
+pub fn matmul_t<'a>(a: &Tensor<'a>, b: &Tensor<'a>) -> Result<Tensor<'a>, SmeltError> {
+    g_matmul::<true>(a, b)
 }
 
 #[inline]
-fn g_matmul<const TRANSPOSE: bool>(
-    a: &Tensor,
-    b: &Tensor,
-    c: &mut Tensor,
-) -> Result<(), SmeltError> {
+fn g_matmul<'a, const TRANSPOSE: bool>(
+    a: &Tensor<'a>,
+    b: &Tensor<'a>,
+) -> Result<Tensor<'a>, SmeltError> {
     let dim = a.shape().len();
 
     if dim < 2 {
         return Err(SmeltError::InsufficientRank { minimum_rank: 2 });
     }
     if b.shape().len() != dim {
-        return Err(SmeltError::InvalidRank { expected_rank: dim });
-    }
-    if c.shape().len() != dim {
         return Err(SmeltError::InvalidRank { expected_rank: dim });
     }
 
@@ -73,9 +68,6 @@ fn g_matmul<const TRANSPOSE: bool>(
         (expected_b, n)
     };
 
-    expected_c[dim - 2] = m;
-    expected_c[dim - 1] = n;
-
     if expected_b != b.shape() {
         return Err(SmeltError::DimensionMismatch {
             expected: expected_b,
@@ -83,12 +75,10 @@ fn g_matmul<const TRANSPOSE: bool>(
         });
     }
 
-    if expected_c != c.shape() {
-        return Err(SmeltError::DimensionMismatch {
-            expected: expected_c,
-            got: c.shape().to_vec(),
-        });
-    }
+    expected_c[dim - 2] = m;
+    expected_c[dim - 1] = n;
+
+    let mut c = Tensor::zeros(expected_c);
 
     let batching: usize = a.shape()[..dim - 2].iter().product();
     let a_skip: usize = m * k;
@@ -143,7 +133,7 @@ fn g_matmul<const TRANSPOSE: bool>(
             )
         }
     });
-    Ok(())
+    Ok(c)
 }
 
 /// tensor elementwise addition. b += a.
@@ -340,35 +330,28 @@ mod tests {
         let a = Tensor::new(data, vec![2, 2]).unwrap();
         let data = [1.0, 2.0, 3.0, 4.0];
         let b = Tensor::borrowed(&data, vec![2, 2]).unwrap();
-        let data = vec![0.0; 4];
-        let mut c = Tensor::new(data, vec![2, 2]).unwrap();
-
-        matmul(&a, &b, &mut c).unwrap();
+        let c = matmul(&a, &b).unwrap();
         assert_eq!(c.data(), &[7.0, 10.0, 15.0, 22.0]);
 
         let data = vec![1.0, 2.0];
         let a = Tensor::new(data, vec![2, 1]).unwrap();
         let data = [3.0, 4.0];
         let b = Tensor::borrowed(&data, vec![1, 2]).unwrap();
-        let data = vec![0.0; 4];
-        let mut c = Tensor::new(data, vec![2, 2]).unwrap();
-        matmul(&a, &b, &mut c).unwrap();
+        let c = matmul(&a, &b).unwrap();
         assert_eq!(c.data(), &[3.0, 4.0, 6.0, 8.0]);
 
         let data: Vec<_> = (0..6).map(|i| i as f32).collect();
         let a = Tensor::new(data, vec![2, 3]).unwrap();
         let data: Vec<_> = (0..6).map(|i| (i + 2) as f32).collect();
         let b = Tensor::new(data, vec![3, 2]).unwrap();
-        let mut c = Tensor::zeros(vec![2, 2]);
-        matmul(&a, &b, &mut c).unwrap();
+        let c = matmul(&a, &b).unwrap();
         assert_eq!(c.data(), &[16., 19., 52., 64.]);
 
         let data: Vec<_> = (0..12).map(|i| i as f32).collect();
         let a = Tensor::new(data, vec![2, 2, 3]).unwrap();
         let data: Vec<_> = (0..12).map(|i| (i + 2) as f32).collect();
         let b = Tensor::new(data, vec![2, 3, 2]).unwrap();
-        let mut c = Tensor::zeros(vec![2, 2, 2]);
-        matmul(&a, &b, &mut c).unwrap();
+        let c = matmul(&a, &b).unwrap();
         assert_eq!(c.data(), &[16., 19., 52., 64., 214., 235., 304., 334.]);
     }
 
@@ -377,31 +360,27 @@ mod tests {
         let a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         // A.T
         let b = Tensor::borrowed(&[1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
-        let mut c = Tensor::zeros(vec![2, 2]);
 
-        matmul_t(&a, &b, &mut c).unwrap();
+        let c = matmul_t(&a, &b).unwrap();
         assert_eq!(c.data(), &[7.0, 10.0, 15.0, 22.0]);
 
         let a = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let b = Tensor::borrowed(&[3.0, 4.0], vec![2, 1]).unwrap();
-        let mut c = Tensor::zeros(vec![2, 2]);
-        matmul_t(&a, &b, &mut c).unwrap();
+        let c = matmul_t(&a, &b).unwrap();
         assert_eq!(c.data(), &[3.0, 4.0, 6.0, 8.0]);
 
         let data: Vec<_> = (0..6).map(|i| i as f32).collect();
         let a = Tensor::new(data, vec![2, 3]).unwrap();
         let data: Vec<_> = (0..6).map(|i| (i + 2) as f32).collect();
         let b = Tensor::new(data, vec![2, 3]).unwrap();
-        let mut c = Tensor::zeros(vec![2, 2]);
-        matmul_t(&a, &b, &mut c).unwrap();
+        let c = matmul_t(&a, &b).unwrap();
         assert_eq!(c.data(), &[11., 20., 38., 74.]);
 
         let data: Vec<_> = (0..12).map(|i| i as f32).collect();
         let a = Tensor::new(data, vec![2, 2, 3]).unwrap();
         let data: Vec<_> = (0..12).map(|i| (i + 2) as f32).collect();
         let b = Tensor::new(data, vec![2, 2, 3]).unwrap();
-        let mut c = Tensor::zeros(vec![2, 2, 2]);
-        matmul_t(&a, &b, &mut c).unwrap();
+        let c = matmul_t(&a, &b).unwrap();
         assert_eq!(c.data(), &[11., 20., 38., 74., 191., 254., 272., 362.]);
     }
 
@@ -463,8 +442,7 @@ mod tests {
     #[test]
     fn simple_select() {
         let a = Tensor::borrowed(&[1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-        let mut tensor = Tensor::zeros(vec![3, 2]);
-        select(&[1, 0, 0], &a, &mut tensor).unwrap();
+        let tensor = select(&[1, 0, 0], &a).unwrap();
         assert_eq!(
             simplify(tensor.data()),
             // Values obtained through python
