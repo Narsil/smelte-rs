@@ -1,17 +1,5 @@
+use crate::TensorError;
 use std::borrow::Cow;
-
-/// Error linked to the tensors themselves
-#[derive(Debug)]
-pub enum TensorError {
-    /// The arguments to the tensor creation are invalid, the shape doesn't match
-    /// the size of the buffer.
-    InvalidBuffer {
-        /// The size of the buffer sent
-        buffer_size: usize,
-        /// The shape of the tensor to create
-        shape: Vec<usize>,
-    },
-}
 
 /// Tensor, can own, or borrow the underlying tensor
 #[derive(Clone)]
@@ -23,7 +11,7 @@ pub struct Tensor<'data> {
 impl<'data> Tensor<'data> {
     /// The shape of the tensor
     /// ```
-    /// use smelt::Tensor;
+    /// use smelt::cpu::f32::Tensor;
     ///
     /// let tensor = Tensor::zeros(vec![2, 2]);
     /// assert_eq!(tensor.shape(), vec![2, 2]);
@@ -34,7 +22,7 @@ impl<'data> Tensor<'data> {
 
     /// A slice to the underlying tensor data
     /// ```
-    /// use smelt::Tensor;
+    /// use smelt::cpu::f32::Tensor;
     ///
     /// let tensor = Tensor::zeros(vec![2, 2]);
     /// assert_eq!(tensor.data(), vec![0.0; 4]);
@@ -45,7 +33,7 @@ impl<'data> Tensor<'data> {
 
     /// A mutable slice to the underlying tensor data
     /// ```
-    /// use smelt::Tensor;
+    /// use smelt::cpu::f32::Tensor;
     ///
     /// let mut tensor = Tensor::zeros(vec![2, 2]);
     /// tensor.data_mut().iter_mut().for_each(|v| *v += 1.0);
@@ -57,7 +45,7 @@ impl<'data> Tensor<'data> {
 
     /// Creates a new nulled tensor with given shape
     /// ```
-    /// use smelt::Tensor;
+    /// use smelt::cpu::f32::Tensor;
     ///
     /// let tensor = Tensor::zeros(vec![2, 2]);
     /// ```
@@ -69,7 +57,7 @@ impl<'data> Tensor<'data> {
 
     /// Creates a new borrowed tensor with given shape. Can fail if data doesn't match the shape
     /// ```
-    /// use smelt::Tensor;
+    /// use smelt::cpu::f32::Tensor;
     ///
     /// let data = [1.0, 2.0, 3.0, 4.0];
     /// let tensor = Tensor::borrowed(&data, vec![2, 2]).unwrap();
@@ -81,7 +69,7 @@ impl<'data> Tensor<'data> {
 
     /// Creates a new tensor with given shape. Can fail if data doesn't match the shape
     /// ```
-    /// use smelt::Tensor;
+    /// use smelt::cpu::f32::Tensor;
     ///
     /// let data = vec![1.0, 2.0, 3.0, 4.0];
     /// let tensor = Tensor::new(data, vec![2, 2]).unwrap();

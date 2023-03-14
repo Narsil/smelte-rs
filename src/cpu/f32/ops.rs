@@ -1,4 +1,4 @@
-use crate::tensor::Tensor;
+use crate::cpu::f32::tensor::Tensor;
 
 use cblas_sys::{
     cblas_sgemm as sgemm, CblasColMajor as ColMajor, CblasNoTrans as NoTr,
@@ -358,7 +358,6 @@ pub fn apply<F: Fn(f32) -> f32 + Sync>(x: &mut Tensor, func: F) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tensor::Tensor;
     use crate::tests::simplify;
 
     #[test]

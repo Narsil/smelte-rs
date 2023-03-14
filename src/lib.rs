@@ -1,10 +1,21 @@
 #![deny(missing_docs)]
 //! Placeholder
 
-/// The tensor operation modules
-pub mod ops;
-/// The various tensor structs and traits
-pub mod tensor;
+/// Error linked to the tensors themselves
+#[derive(Debug)]
+pub enum TensorError {
+    /// The arguments to the tensor creation are invalid, the shape doesn't match
+    /// the size of the buffer.
+    InvalidBuffer {
+        /// The size of the buffer sent
+        buffer_size: usize,
+        /// The shape of the tensor to create
+        shape: Vec<usize>,
+    },
+}
+
+/// The various CPU implementations
+pub mod cpu;
 
 #[cfg(test)]
 mod tests {
