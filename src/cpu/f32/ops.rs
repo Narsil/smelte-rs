@@ -1,36 +1,10 @@
 use crate::cpu::f32::tensor::Tensor;
+use crate::SmeltError;
 
 use cblas_sys::{
     cblas_sgemm as sgemm, CblasColMajor as ColMajor, CblasNoTrans as NoTr,
     CblasRowMajor as RowMajor, CblasTrans as Tr,
 };
-
-/// Potential errors when using the library
-#[derive(Debug)]
-pub enum SmeltError {
-    /// The operation could not succeed because the shapes are not valid.
-    DimensionMismatch {
-        /// The shape that we should have seen
-        expected: Vec<usize>,
-        /// The shape that we received
-        got: Vec<usize>,
-    },
-    /// The tensor given has insufficient rank (rank 2 means a tensor that has a shape of length 2)
-    InsufficientRank {
-        /// The minimum rank that we expect
-        minimum_rank: usize,
-    },
-    /// The tensor given has not the expected rank (rank 2 means a tensor that has a shape of length 2)
-    InvalidRank {
-        /// The rank that we expect
-        expected_rank: usize,
-    },
-    /// The tensor given has not enough room for the operations
-    VectorTooSmall {
-        /// The minimum size that we expect
-        minimum: usize,
-    },
-}
 
 /// Operation for selecting entire rows within tensor `weights`. Each `id` is the index
 /// of the row.

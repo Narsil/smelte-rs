@@ -4,7 +4,7 @@ use std::borrow::Cow;
 /// Tensor, can own, or borrow the underlying tensor
 #[derive(Clone)]
 pub struct Tensor<'data> {
-    shape: Vec<usize>,
+    pub(super) shape: Vec<usize>,
     data: Cow<'data, [f32]>,
 }
 
