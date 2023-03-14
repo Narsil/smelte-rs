@@ -1,6 +1,15 @@
 #![deny(missing_docs)]
 //! Placeholder
 
+/// The various CPU implementations
+pub mod cpu;
+
+/// The neural networks
+pub mod nn;
+
+/// The traits for generic implementations
+pub mod traits;
+
 /// Error linked to the tensors themselves
 #[derive(Debug)]
 pub enum TensorError {
@@ -14,8 +23,32 @@ pub enum TensorError {
     },
 }
 
-/// The various CPU implementations
-pub mod cpu;
+/// Potential errors when using the library
+#[derive(Debug)]
+pub enum SmeltError {
+    /// The operation could not succeed because the shapes are not valid.
+    DimensionMismatch {
+        /// The shape that we should have seen
+        expected: Vec<usize>,
+        /// The shape that we received
+        got: Vec<usize>,
+    },
+    /// The tensor given has insufficient rank (rank 2 means a tensor that has a shape of length 2)
+    InsufficientRank {
+        /// The minimum rank that we expect
+        minimum_rank: usize,
+    },
+    /// The tensor given has not the expected rank (rank 2 means a tensor that has a shape of length 2)
+    InvalidRank {
+        /// The rank that we expect
+        expected_rank: usize,
+    },
+    /// The tensor given has not enough room for the operations
+    VectorTooSmall {
+        /// The minimum size that we expect
+        minimum: usize,
+    },
+}
 
 #[cfg(test)]
 mod tests {
