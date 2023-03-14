@@ -13,8 +13,7 @@ pub enum TensorError {
     },
 }
 
-/// Readable only tensor. Mostly used for on disk tensors
-/// which represent a given model
+/// Tensor, can own, or borrow the underlying tensor
 #[derive(Clone)]
 pub struct Tensor<'data> {
     shape: Vec<usize>,
@@ -22,28 +21,59 @@ pub struct Tensor<'data> {
 }
 
 impl<'data> Tensor<'data> {
+    /// The shape of the tensor
+    /// ```
+    /// let tensor = Tensor::zeros(vec![2, 2]);
+    /// assert_eq!(tensor.shape(), vec![2, 2]);
+    /// ```
     pub fn shape(&self) -> &[usize] {
         &self.shape
     }
 
+    /// A slice to the underlying tensor data
+    /// ```
+    /// let tensor = Tensor::zeros(vec![2, 2]);
+    /// assert_eq!(tensor.data(), vec![0.0, 4]);
+    /// ```
     pub fn data(&self) -> &[f32] {
         self.data.as_ref()
     }
 
+    /// A mutable slice to the underlying tensor data
+    /// ```
+    /// let mut tensor = Tensor::zeros(vec![2, 2]);
+    /// tensor.data_mut().iter_mut().for_each(|v| *v += 1.0);
+    /// assert_eq!(tensor.data(), vec![1.0, 4]);
+    /// ```
     pub fn data_mut(&mut self) -> &mut [f32] {
         self.data.to_mut()
     }
 
+    /// Creates a new nulled tensor with given shape
+    /// ```
+    /// let tensor = Tensor::zeros(vec![2, 2]);
+    /// ```
     pub fn zeros(shape: Vec<usize>) -> Self {
         let nelement: usize = shape.iter().product();
         let data = Cow::Owned(vec![0.0; nelement]);
         Self { shape, data }
     }
+
+    /// Creates a new borrowed tensor with given shape. Can fail if data doesn't match the shape
+    /// ```
+    /// let data = [1.0, 2.0, 3.0, 4.0];
+    /// let tensor = Tensor::borrowed(data, vec![2, 2]).unwrap();
+    /// ```
     pub fn borrowed(data: &'data [f32], shape: Vec<usize>) -> Result<Self, TensorError> {
         let cow: Cow<'data, [f32]> = data.into();
         Self::new(cow, shape)
     }
 
+    /// Creates a new tensor with given shape. Can fail if data doesn't match the shape
+    /// ```
+    /// let data = vec![1.0, 2.0, 3.0, 4.0];
+    /// let tensor = Tensor::new(data, vec![2, 2]).unwrap();
+    /// ```
     pub fn new<T>(data: T, shape: Vec<usize>) -> Result<Self, TensorError>
     where
         T: Into<Cow<'data, [f32]>>,
@@ -58,40 +88,3 @@ impl<'data> Tensor<'data> {
         Ok(Self { shape, data })
     }
 }
-
-// #[cfg(feature = "safetensors")]
-// mod safetensors {
-//     use super::ViewTensor;
-//     use safetensors::tensor::{Dtype, TensorView};
-//     use std::borrow::Cow;
-//
-//     pub fn to_f32<'data>(view: &TensorView<'data>) -> Cow<'data, [f32]> {
-//         assert_eq!(view.dtype(), Dtype::F32);
-//         let v = view.data();
-//         if (v.as_ptr() as usize) % 4 == 0 {
-//             // SAFETY This is safe because we just checked that this
-//             // was correctly aligned.
-//             let data: &[f32] =
-//                 unsafe { std::slice::from_raw_parts(v.as_ptr() as *const f32, v.len() / 4) };
-//             Cow::Borrowed(data)
-//         } else {
-//             let mut c = Vec::with_capacity(v.len() / 4);
-//             let mut i = 0;
-//             while i < v.len() {
-//                 c.push(f32::from_le_bytes([v[i], v[i + 1], v[i + 2], v[i + 3]]));
-//                 i += 4;
-//             }
-//             Cow::Owned(c)
-//         }
-//     }
-//
-//     impl<'data> From<TensorView<'data>> for ViewTensor<'data> {
-//         fn from(view: TensorView<'data>) -> Self {
-//             let data = to_f32(&view);
-//             Self {
-//                 data,
-//                 shape: view.shape().to_vec(),
-//             }
-//         }
-//     }
-// }
