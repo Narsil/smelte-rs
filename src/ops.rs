@@ -1,4 +1,4 @@
-use crate::tensor::{Tensor, TensorMut};
+use crate::tensor::Tensor;
 
 use cblas_sys::{
     cblas_sgemm as sgemm, CblasColMajor as ColMajor, CblasNoTrans as NoTr,
@@ -34,11 +34,7 @@ pub enum SmeltError {
 
 /// Operation for selecting entire rows within tensor `weights`. Each `id` is the index
 /// of the row.
-pub fn select<T: Tensor, TM: TensorMut>(
-    ids: &[u32],
-    weights: &T,
-    out: &mut TM,
-) -> Result<(), SmeltError> {
+pub fn select(ids: &[u32], weights: &Tensor, out: &mut Tensor) -> Result<(), SmeltError> {
     let hidden_dim = weights.shape()[1];
     let sequence_length = ids.len();
     if out.shape() != [sequence_length, hidden_dim] {
@@ -58,28 +54,20 @@ pub fn select<T: Tensor, TM: TensorMut>(
 }
 
 /// Regular matrix multiplication
-pub fn matmul<A: Tensor, B: Tensor, TM: TensorMut>(
-    a: &A,
-    b: &B,
-    c: &mut TM,
-) -> Result<(), SmeltError> {
-    g_matmul::<false, A, B, TM>(a, b, c)
+pub fn matmul(a: &Tensor, b: &Tensor, c: &mut Tensor) -> Result<(), SmeltError> {
+    g_matmul::<false>(a, b, c)
 }
 
 /// Matrix multiplication matmul(A, B.transposed())
-pub fn matmul_t<A: Tensor, B: Tensor, TM: TensorMut>(
-    a: &A,
-    b: &B,
-    c: &mut TM,
-) -> Result<(), SmeltError> {
-    g_matmul::<true, A, B, TM>(a, b, c)
+pub fn matmul_t(a: &Tensor, b: &Tensor, c: &mut Tensor) -> Result<(), SmeltError> {
+    g_matmul::<true>(a, b, c)
 }
 
 #[inline]
-fn g_matmul<const TRANSPOSE: bool, A: Tensor, B: Tensor, TM: TensorMut>(
-    a: &A,
-    b: &B,
-    c: &mut TM,
+fn g_matmul<const TRANSPOSE: bool>(
+    a: &Tensor,
+    b: &Tensor,
+    c: &mut Tensor,
 ) -> Result<(), SmeltError> {
     let dim = a.shape().len();
 
@@ -186,7 +174,7 @@ fn g_matmul<const TRANSPOSE: bool, A: Tensor, B: Tensor, TM: TensorMut>(
 
 /// tensor elementwise addition. b += a.
 /// a is automatically broadcasted.
-pub fn add<T: Tensor, TM: TensorMut>(a: &T, b: &mut TM) -> Result<(), SmeltError> {
+pub fn add(a: &Tensor, b: &mut Tensor) -> Result<(), SmeltError> {
     if a.shape() == b.shape() {
         a.data()
             .iter()
@@ -212,7 +200,7 @@ pub fn add<T: Tensor, TM: TensorMut>(a: &T, b: &mut TM) -> Result<(), SmeltError
 
 /// tensor elementwise multiplication. b *= a.
 /// a is automatically broadcasted.
-pub fn mul<T: Tensor, TM: TensorMut>(a: &T, b: &mut TM) -> Result<(), SmeltError> {
+pub fn mul(a: &Tensor, b: &mut Tensor) -> Result<(), SmeltError> {
     if a.shape() == b.shape() {
         a.data()
             .iter()
@@ -240,7 +228,7 @@ pub fn mul<T: Tensor, TM: TensorMut>(a: &T, b: &mut TM) -> Result<(), SmeltError
 /// x = (x - x.mean()) / (x.var() + epsilon)
 /// `mean` and `var` do not have to be initialized, they are simply passed to
 /// avoid allocation.
-pub fn normalize<TM: TensorMut>(x: &mut TM, epsilon: f32) -> Result<(), SmeltError> {
+pub fn normalize(x: &mut Tensor, epsilon: f32) -> Result<(), SmeltError> {
     let dim = x.shape().len();
     let size = x.shape()[dim - 1];
     x.data_mut().chunks_mut(size).for_each(|chunk| {
@@ -256,8 +244,8 @@ pub fn normalize<TM: TensorMut>(x: &mut TM, epsilon: f32) -> Result<(), SmeltErr
 }
 
 #[inline]
-fn g_softmax<const CAUSAL: bool, TM: TensorMut>(
-    x: &mut TM,
+fn g_softmax<const CAUSAL: bool>(
+    x: &mut Tensor,
     past_sequence_length: usize,
 ) -> Result<(), SmeltError> {
     let dim = x.shape().len();
@@ -298,22 +286,19 @@ fn g_softmax<const CAUSAL: bool, TM: TensorMut>(
 }
 
 /// Softmax on the last dimension for tensor `x`
-pub fn softmax<TM: TensorMut>(x: &mut TM) -> Result<(), SmeltError> {
-    g_softmax::<false, TM>(x, 0)
+pub fn softmax(x: &mut Tensor) -> Result<(), SmeltError> {
+    g_softmax::<false>(x, 0)
 }
 
 /// Causal softmax on the last dimension for tensor `x`. The causality is determined by the
 /// shape of `x` and `past_sequence_length` which defines how big is the missing part of the
 /// square.
-pub fn causal_softmax<TM: TensorMut>(
-    x: &mut TM,
-    past_sequence_length: usize,
-) -> Result<(), SmeltError> {
-    g_softmax::<true, TM>(x, past_sequence_length)
+pub fn causal_softmax(x: &mut Tensor, past_sequence_length: usize) -> Result<(), SmeltError> {
+    g_softmax::<true>(x, past_sequence_length)
 }
 
 /// Argmax of the last dimension of tensor `x `.
-pub fn special_argmax<T: Tensor>(x: &T) -> Result<usize, SmeltError> {
+pub fn special_argmax(x: &Tensor) -> Result<usize, SmeltError> {
     if x.shape().len() != 2 {
         return Err(SmeltError::InvalidRank { expected_rank: 2 });
     }
@@ -366,90 +351,90 @@ pub fn gelu(v: f32) -> f32 {
 }
 
 /// Applies `func` to every item of the tensor
-pub fn apply<T: TensorMut, F: Fn(f32) -> f32 + Sync>(x: &mut T, func: F) {
+pub fn apply<F: Fn(f32) -> f32 + Sync>(x: &mut Tensor, func: F) {
     x.data_mut().iter_mut().for_each(|v| *v = func(*v));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tensor::{OwnedTensor, ViewTensor};
+    use crate::tensor::Tensor;
     use crate::tests::simplify;
 
     #[test]
     fn simple_matmul() {
         let data = vec![1.0, 2.0, 3.0, 4.0];
-        let a = OwnedTensor::new(data, vec![2, 2]).unwrap();
+        let a = Tensor::new(data, vec![2, 2]).unwrap();
         let data = [1.0, 2.0, 3.0, 4.0];
-        let b = ViewTensor::new(&data, vec![2, 2]).unwrap();
+        let b = Tensor::borrowed(&data, vec![2, 2]).unwrap();
         let data = vec![0.0; 4];
-        let mut c = OwnedTensor::new(data, vec![2, 2]).unwrap();
+        let mut c = Tensor::new(data, vec![2, 2]).unwrap();
 
         matmul(&a, &b, &mut c).unwrap();
         assert_eq!(c.data(), &[7.0, 10.0, 15.0, 22.0]);
 
         let data = vec![1.0, 2.0];
-        let a = OwnedTensor::new(data, vec![2, 1]).unwrap();
+        let a = Tensor::new(data, vec![2, 1]).unwrap();
         let data = [3.0, 4.0];
-        let b = ViewTensor::new(&data, vec![1, 2]).unwrap();
+        let b = Tensor::borrowed(&data, vec![1, 2]).unwrap();
         let data = vec![0.0; 4];
-        let mut c = OwnedTensor::new(data, vec![2, 2]).unwrap();
+        let mut c = Tensor::new(data, vec![2, 2]).unwrap();
         matmul(&a, &b, &mut c).unwrap();
         assert_eq!(c.data(), &[3.0, 4.0, 6.0, 8.0]);
 
         let data: Vec<_> = (0..6).map(|i| i as f32).collect();
-        let a = OwnedTensor::new(data, vec![2, 3]).unwrap();
+        let a = Tensor::new(data, vec![2, 3]).unwrap();
         let data: Vec<_> = (0..6).map(|i| (i + 2) as f32).collect();
-        let b = OwnedTensor::new(data, vec![3, 2]).unwrap();
-        let mut c = OwnedTensor::zeros(vec![2, 2]);
+        let b = Tensor::new(data, vec![3, 2]).unwrap();
+        let mut c = Tensor::zeros(vec![2, 2]);
         matmul(&a, &b, &mut c).unwrap();
         assert_eq!(c.data(), &[16., 19., 52., 64.]);
 
         let data: Vec<_> = (0..12).map(|i| i as f32).collect();
-        let a = OwnedTensor::new(data, vec![2, 2, 3]).unwrap();
+        let a = Tensor::new(data, vec![2, 2, 3]).unwrap();
         let data: Vec<_> = (0..12).map(|i| (i + 2) as f32).collect();
-        let b = OwnedTensor::new(data, vec![2, 3, 2]).unwrap();
-        let mut c = OwnedTensor::zeros(vec![2, 2, 2]);
+        let b = Tensor::new(data, vec![2, 3, 2]).unwrap();
+        let mut c = Tensor::zeros(vec![2, 2, 2]);
         matmul(&a, &b, &mut c).unwrap();
         assert_eq!(c.data(), &[16., 19., 52., 64., 214., 235., 304., 334.]);
     }
 
     #[test]
     fn simple_matmul_t() {
-        let a = OwnedTensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+        let a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         // A.T
-        let b = ViewTensor::new(&[1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
-        let mut c = OwnedTensor::zeros(vec![2, 2]);
+        let b = Tensor::borrowed(&[1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
+        let mut c = Tensor::zeros(vec![2, 2]);
 
         matmul_t(&a, &b, &mut c).unwrap();
         assert_eq!(c.data(), &[7.0, 10.0, 15.0, 22.0]);
 
-        let a = OwnedTensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let b = ViewTensor::new(&[3.0, 4.0], vec![2, 1]).unwrap();
-        let mut c = OwnedTensor::zeros(vec![2, 2]);
+        let a = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
+        let b = Tensor::borrowed(&[3.0, 4.0], vec![2, 1]).unwrap();
+        let mut c = Tensor::zeros(vec![2, 2]);
         matmul_t(&a, &b, &mut c).unwrap();
         assert_eq!(c.data(), &[3.0, 4.0, 6.0, 8.0]);
 
         let data: Vec<_> = (0..6).map(|i| i as f32).collect();
-        let a = OwnedTensor::new(data, vec![2, 3]).unwrap();
+        let a = Tensor::new(data, vec![2, 3]).unwrap();
         let data: Vec<_> = (0..6).map(|i| (i + 2) as f32).collect();
-        let b = OwnedTensor::new(data, vec![2, 3]).unwrap();
-        let mut c = OwnedTensor::zeros(vec![2, 2]);
+        let b = Tensor::new(data, vec![2, 3]).unwrap();
+        let mut c = Tensor::zeros(vec![2, 2]);
         matmul_t(&a, &b, &mut c).unwrap();
         assert_eq!(c.data(), &[11., 20., 38., 74.]);
 
         let data: Vec<_> = (0..12).map(|i| i as f32).collect();
-        let a = OwnedTensor::new(data, vec![2, 2, 3]).unwrap();
+        let a = Tensor::new(data, vec![2, 2, 3]).unwrap();
         let data: Vec<_> = (0..12).map(|i| (i + 2) as f32).collect();
-        let b = OwnedTensor::new(data, vec![2, 2, 3]).unwrap();
-        let mut c = OwnedTensor::zeros(vec![2, 2, 2]);
+        let b = Tensor::new(data, vec![2, 2, 3]).unwrap();
+        let mut c = Tensor::zeros(vec![2, 2, 2]);
         matmul_t(&a, &b, &mut c).unwrap();
         assert_eq!(c.data(), &[11., 20., 38., 74., 191., 254., 272., 362.]);
     }
 
     #[test]
     fn simple_softmax() {
-        let mut a = OwnedTensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+        let mut a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         softmax(&mut a).unwrap();
         assert_eq!(
             simplify(a.data()),
@@ -460,7 +445,7 @@ mod tests {
 
     #[test]
     fn simple_causal_softmax() {
-        let mut a = OwnedTensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+        let mut a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         // Large enough for the second test
         causal_softmax(&mut a, 0).unwrap();
         assert_eq!(
@@ -469,7 +454,7 @@ mod tests {
             [1.0000, 0.0000, 0.2689, 0.7311]
         );
 
-        let mut a = OwnedTensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+        let mut a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         causal_softmax(&mut a, 1).unwrap();
         assert_eq!(
             simplify(a.data()),
@@ -478,7 +463,7 @@ mod tests {
         );
 
         let data: Vec<_> = (0..12).map(|i| (i + 1) as f32).collect();
-        let mut a = OwnedTensor::new(data, vec![3, 2, 2]).unwrap();
+        let mut a = Tensor::new(data, vec![3, 2, 2]).unwrap();
         causal_softmax(&mut a, 0).unwrap();
         assert_eq!(
             simplify(a.data()),
@@ -490,7 +475,7 @@ mod tests {
         );
 
         let data: Vec<_> = (0..12).map(|i| (i + 1) as f32).collect();
-        let mut a = OwnedTensor::new(data, vec![2, 2, 3]).unwrap();
+        let mut a = Tensor::new(data, vec![2, 2, 3]).unwrap();
         causal_softmax(&mut a, 1).unwrap();
         assert_eq!(
             simplify(a.data()),
@@ -504,8 +489,8 @@ mod tests {
 
     #[test]
     fn simple_select() {
-        let a = ViewTensor::new(&[1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-        let mut tensor = OwnedTensor::new(vec![0.0; 6], vec![3, 2]).unwrap();
+        let a = Tensor::borrowed(&[1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+        let mut tensor = Tensor::zeros(vec![3, 2]);
         select(&[1, 0, 0], &a, &mut tensor).unwrap();
         assert_eq!(
             simplify(tensor.data()),
@@ -516,7 +501,7 @@ mod tests {
 
     #[test]
     fn simple_normalize() {
-        let mut a = OwnedTensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+        let mut a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let epsilon = 1e-5;
         normalize(&mut a, epsilon).unwrap();
         assert_eq!(
