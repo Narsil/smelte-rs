@@ -1,8 +1,8 @@
 use super::ops;
 use super::tensor::Tensor;
 use crate::traits::{
-    Tensor as TensorTrait, TensorAdd, TensorMatmul, TensorMatmulT, TensorMul, TensorNormalize,
-    TensorOps, TensorSelect,
+    Tensor as TensorTrait, TensorAdd, TensorGelu, TensorMatmul, TensorMatmulT, TensorMul,
+    TensorNormalize, TensorOps, TensorSelect, TensorSoftmax, TensorTanh,
 };
 use crate::SmeltError;
 
@@ -46,8 +46,26 @@ impl<'a> TensorMatmulT<Tensor<'a>> for Tensor<'a> {
 }
 
 impl<'a> TensorSelect<Tensor<'a>> for Tensor<'a> {
-    fn select(x: &[u32], weight: &Tensor<'a>) -> Result<Tensor<'a>, SmeltError> {
+    fn select(x: &[usize], weight: &Tensor<'a>) -> Result<Tensor<'a>, SmeltError> {
         ops::select(x, weight)
+    }
+}
+
+impl<'a> TensorGelu<Tensor<'a>> for Tensor<'a> {
+    fn gelu(x: &mut Tensor<'a>) -> Result<(), SmeltError> {
+        ops::apply(x, ops::gelu)
+    }
+}
+
+impl<'a> TensorTanh<Tensor<'a>> for Tensor<'a> {
+    fn tanh(x: &mut Tensor<'a>) -> Result<(), SmeltError> {
+        ops::apply(x, ops::inline_tanh)
+    }
+}
+
+impl<'a> TensorSoftmax<Tensor<'a>> for Tensor<'a> {
+    fn softmax(x: &mut Tensor<'a>) -> Result<(), SmeltError> {
+        ops::softmax(x)
     }
 }
 

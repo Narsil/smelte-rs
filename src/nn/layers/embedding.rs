@@ -14,7 +14,7 @@ impl<T: Tensor + TensorOps<T>> Embedding<T> {
     }
 
     /// TODO
-    pub fn forward(&self, ids: &[u32]) -> Result<T, SmeltError> {
+    pub fn forward(&self, ids: &[usize]) -> Result<T, SmeltError> {
         T::select(ids, &self.weight)
     }
 }

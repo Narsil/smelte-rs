@@ -8,7 +8,7 @@ use cblas_sys::{
 
 /// Operation for selecting entire rows within tensor `weights`. Each `id` is the index
 /// of the row.
-pub fn select<'a>(ids: &[u32], weights: &Tensor<'a>) -> Result<Tensor<'a>, SmeltError> {
+pub fn select<'a>(ids: &[usize], weights: &Tensor<'a>) -> Result<Tensor<'a>, SmeltError> {
     let sequence_length = ids.len();
     let vocab_size = weights.shape()[0];
     let hidden_dim = weights.shape()[1];

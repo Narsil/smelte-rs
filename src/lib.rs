@@ -56,6 +56,14 @@ pub enum SmeltError {
         /// culprit id
         id: usize,
     },
+
+    /// Some slices do not have the expected lengths
+    InvalidLength {
+        /// The size we expected
+        expected: usize,
+        /// The size we got
+        got: usize,
+    },
 }
 
 #[cfg(test)]

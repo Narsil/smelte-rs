@@ -15,7 +15,7 @@ impl<T: Tensor + TensorOps<T>> Linear<T> {
     }
 
     /// Forward pass
-    pub fn forward(&self, tensor: &mut T) -> Result<T, SmeltError> {
+    pub fn forward(&self, tensor: &T) -> Result<T, SmeltError> {
         let mut out = T::matmul(tensor, &self.weight)?;
         T::add(&self.bias, &mut out)?;
         Ok(out)
@@ -36,7 +36,7 @@ impl<T: Tensor + TensorOps<T>> LinearT<T> {
     }
 
     /// Forward pass
-    pub fn forward(&self, tensor: &mut T) -> Result<T, SmeltError> {
+    pub fn forward(&self, tensor: &T) -> Result<T, SmeltError> {
         let mut out = T::matmul_t(tensor, &self.weight)?;
         T::add(&self.bias, &mut out)?;
         Ok(out)
@@ -56,7 +56,7 @@ impl<T: Tensor + TensorOps<T>> UnbiasedLinear<T> {
     }
 
     /// Forward pass
-    pub fn forward(&self, tensor: &mut T) -> Result<T, SmeltError> {
+    pub fn forward(&self, tensor: &T) -> Result<T, SmeltError> {
         T::matmul(tensor, &self.weight)
     }
 }

@@ -1,7 +1,7 @@
 use crate::SmeltError;
 
 /// TODO
-pub trait Tensor {
+pub trait Tensor: Clone {
     /// TODO
     fn shape(&self) -> &[usize];
     /// TODO
@@ -16,6 +16,9 @@ pub trait TensorOps<T>:
     + TensorMul<T>
     + TensorNormalize<T>
     + TensorSelect<T>
+    + TensorGelu<T>
+    + TensorTanh<T>
+    + TensorSoftmax<T>
 {
 }
 
@@ -52,5 +55,23 @@ pub trait TensorNormalize<T> {
 /// TODO
 pub trait TensorSelect<T> {
     /// TODO
-    fn select(x: &[u32], weight: &T) -> Result<T, SmeltError>;
+    fn select(x: &[usize], weight: &T) -> Result<T, SmeltError>;
+}
+
+/// TODO
+pub trait TensorGelu<T> {
+    /// TODO
+    fn gelu(x: &mut T) -> Result<(), SmeltError>;
+}
+
+/// TODO
+pub trait TensorTanh<T> {
+    /// TODO
+    fn tanh(x: &mut T) -> Result<(), SmeltError>;
+}
+
+/// TODO
+pub trait TensorSoftmax<T> {
+    /// TODO
+    fn softmax(x: &mut T) -> Result<(), SmeltError>;
 }
