@@ -1,7 +1,7 @@
 use crate::traits::{Tensor, TensorOps};
 use crate::SmeltError;
 
-/// Linear layer, applies matmul(x, W) + b
+/// Linear layer, applies matmul(x, W.T) + b
 #[derive(Clone)]
 pub struct Linear<T: Tensor> {
     weight: T,
@@ -16,13 +16,13 @@ impl<T: Tensor + TensorOps<T>> Linear<T> {
 
     /// Forward pass
     pub fn forward(&self, tensor: &T) -> Result<T, SmeltError> {
-        let mut out = T::matmul(tensor, &self.weight)?;
+        let mut out = T::matmul_t(tensor, &self.weight)?;
         T::add(&self.bias, &mut out)?;
         Ok(out)
     }
 }
 
-/// LinearT layer, applies matmul(x, W.T) + b
+/// LinearT layer, applies matmul(x, W) + b
 #[derive(Clone)]
 pub struct LinearT<T: Tensor> {
     weight: T,
@@ -37,7 +37,7 @@ impl<T: Tensor + TensorOps<T>> LinearT<T> {
 
     /// Forward pass
     pub fn forward(&self, tensor: &T) -> Result<T, SmeltError> {
-        let mut out = T::matmul_t(tensor, &self.weight)?;
+        let mut out = T::matmul(tensor, &self.weight)?;
         T::add(&self.bias, &mut out)?;
         Ok(out)
     }
