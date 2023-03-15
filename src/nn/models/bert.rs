@@ -32,11 +32,6 @@ fn attention<'a>(
     let hidden_dim = query.shape()[1];
     assert_eq!(hidden_dim % num_heads, 0);
 
-    assert_eq!(
-        qk.shape(),
-        vec![num_heads, sequence_length, sequence_length]
-    );
-
     let query = split_heads(query, num_heads);
     let key = split_heads(key, num_heads);
     let value = split_heads(value, num_heads);
@@ -62,6 +57,29 @@ fn attention<'a>(
     F32Tensor::new(new_out, vec![sequence_length, hidden_dim]).unwrap()
 }
 
+/// TODO
+pub trait TensorAttention<T> {
+    /// TODO
+    fn attention(q: &T, k: &T, v: &T, num_heads: usize) -> Result<T, SmeltError>;
+}
+
+impl<'a> TensorAttention<F32Tensor<'a>> for F32Tensor<'a> {
+    fn attention(
+        q: &F32Tensor<'a>,
+        k: &F32Tensor<'a>,
+        v: &F32Tensor<'a>,
+        num_heads: usize,
+    ) -> Result<F32Tensor<'a>, SmeltError> {
+        Ok(attention(q, k, v, num_heads))
+    }
+}
+
+/// TODO
+pub trait BertOps<T>: TensorOps<T> + TensorAttention<T> {}
+
+impl<'a> BertOps<F32Tensor<'a>> for F32Tensor<'a> {}
+
+/// TODO
 #[derive(Clone)]
 pub struct BertAttention<T: Tensor> {
     query: Linear<T>,
@@ -72,7 +90,8 @@ pub struct BertAttention<T: Tensor> {
     num_heads: usize,
 }
 
-impl<T: Tensor + TensorOps<T>> BertAttention<T> {
+impl<T: Tensor + BertOps<T>> BertAttention<T> {
+    /// TODO
     pub fn new(
         query: Linear<T>,
         key: Linear<T>,
@@ -91,19 +110,21 @@ impl<T: Tensor + TensorOps<T>> BertAttention<T> {
         }
     }
 
+    /// TODO
     pub fn forward(&self, hidden_states: &T) -> Result<T, SmeltError> {
         let q = self.query.forward(hidden_states)?;
         let k = self.key.forward(hidden_states)?;
         let v = self.value.forward(hidden_states)?;
 
-        let attended = attention(&q, &k, &v, self.num_heads);
+        let attended = T::attention(&q, &k, &v, self.num_heads)?;
         let mut tensor = self.output.forward(&attended)?;
-        T::add(&hidden_states, &mut tensor)?;
+        T::add(hidden_states, &mut tensor)?;
         self.output_ln.forward(&mut tensor)?;
         Ok(tensor)
     }
 }
 
+/// TODO
 #[derive(Clone)]
 pub struct Mlp<T: Tensor> {
     intermediate: Linear<T>,
@@ -111,7 +132,8 @@ pub struct Mlp<T: Tensor> {
     output_ln: LayerNorm<T>,
 }
 
-impl<T: Tensor + TensorOps<T>> Mlp<T> {
+impl<T: Tensor + BertOps<T>> Mlp<T> {
+    /// TODO
     pub fn new(intermediate: Linear<T>, output: Linear<T>, output_ln: LayerNorm<T>) -> Self {
         Self {
             intermediate,
@@ -120,10 +142,11 @@ impl<T: Tensor + TensorOps<T>> Mlp<T> {
         }
     }
 
-    fn forward(&self, tensor: &T) -> Result<T, SmeltError> {
+    /// TODO
+    pub fn forward(&self, tensor: &T) -> Result<T, SmeltError> {
         let input_tensor = tensor.clone();
         let mut tensor = self.intermediate.forward(tensor)?;
-        T::gelu(&mut tensor);
+        T::gelu(&mut tensor)?;
         let mut tensor = self.output.forward(&tensor)?;
         T::add(&input_tensor, &mut tensor)?;
         self.output_ln.forward(&mut tensor)?;
@@ -131,42 +154,49 @@ impl<T: Tensor + TensorOps<T>> Mlp<T> {
     }
 }
 
+/// TODO
 #[derive(Clone)]
 pub struct BertLayer<T: Tensor> {
     attention: BertAttention<T>,
     mlp: Mlp<T>,
 }
 
-impl<T: Tensor + TensorOps<T>> BertLayer<T> {
+impl<T: Tensor + BertOps<T>> BertLayer<T> {
+    /// TODO
     pub fn new(attention: BertAttention<T>, mlp: Mlp<T>) -> Self {
         Self { attention, mlp }
     }
 
-    fn forward(&self, tensor: &T) -> Result<T, SmeltError> {
+    /// TODO
+    pub fn forward(&self, tensor: &T) -> Result<T, SmeltError> {
         let tensor = self.attention.forward(tensor)?;
         self.mlp.forward(&tensor)
     }
 }
 
+/// TODO
 #[derive(Clone)]
 pub struct BertEncoder<T: Tensor> {
     layers: Vec<BertLayer<T>>,
 }
 
-impl<T: Tensor + TensorOps<T>> BertEncoder<T> {
+impl<T: Tensor + BertOps<T>> BertEncoder<T> {
+    /// TODO
     pub fn new(layers: Vec<BertLayer<T>>) -> Self {
         Self { layers }
     }
 
-    fn forward(&self, tensor: &T) -> Result<T, SmeltError> {
-        let mut tensor = *tensor;
-        for layer in &self.layers {
+    /// TODO
+    pub fn forward(&self, tensor: &T) -> Result<T, SmeltError> {
+        let mut tensor = self.layers[0].forward(tensor)?;
+        for layer in &self.layers[1..] {
             tensor = layer.forward(&tensor)?;
         }
         Ok(tensor)
     }
 }
 
+/// TODO
 #[derive(Clone)]
 pub struct BertEmbeddings<T: Tensor> {
     input_embeddings: Embedding<T>,
@@ -175,7 +205,8 @@ pub struct BertEmbeddings<T: Tensor> {
     layer_norm: LayerNorm<T>,
 }
 
-impl<T: Tensor + TensorOps<T>> BertEmbeddings<T> {
+impl<T: Tensor + BertOps<T>> BertEmbeddings<T> {
+    /// TODO
     pub fn new(
         input_embeddings: Embedding<T>,
         position_embeddings: Embedding<T>,
@@ -189,8 +220,8 @@ impl<T: Tensor + TensorOps<T>> BertEmbeddings<T> {
             layer_norm,
         }
     }
-}
-impl<T: Tensor + TensorOps<T>> BertEmbeddings<T> {
+
+    /// TODO
     pub fn forward(&self, input_ids: &[usize], type_ids: &[usize]) -> Result<T, SmeltError> {
         if input_ids.len() != type_ids.len() {
             return Err(SmeltError::InvalidLength {
@@ -212,29 +243,41 @@ impl<T: Tensor + TensorOps<T>> BertEmbeddings<T> {
     }
 }
 
-pub struct Bert<T: Tensor + TensorOps<T>> {
+/// TODO
+pub struct Bert<T: Tensor + BertOps<T>> {
     embeddings: BertEmbeddings<T>,
     encoder: BertEncoder<T>,
 }
 
-impl<T: Tensor + TensorOps<T>> Bert<T> {
+impl<T: Tensor + BertOps<T>> Bert<T> {
+    /// TODO
+    pub fn new(embeddings: BertEmbeddings<T>, encoder: BertEncoder<T>) -> Self {
+        Self {
+            embeddings,
+            encoder,
+        }
+    }
+    /// TODO
     pub fn forward(&self, input_ids: &[usize], type_ids: &[usize]) -> Result<T, SmeltError> {
         let tensor = self.embeddings.forward(input_ids, type_ids)?;
         self.encoder.forward(&tensor)
     }
 }
 
+/// TODO
 #[derive(Clone)]
 pub struct BertPooler<T: Tensor> {
     pooler: Linear<T>,
 }
 
-impl<T: Tensor + TensorOps<T>> BertPooler<T> {
+impl<T: Tensor + BertOps<T>> BertPooler<T> {
+    /// TODO
     pub fn new(pooler: Linear<T>) -> Self {
         Self { pooler }
     }
 
-    fn forward(&self, tensor: &T) -> Result<T, SmeltError> {
+    /// TODO
+    pub fn forward(&self, tensor: &T) -> Result<T, SmeltError> {
         let first = T::select(&[0], tensor)?;
         let mut tensor = self.pooler.forward(&first)?;
         T::tanh(&mut tensor)?;
@@ -242,13 +285,15 @@ impl<T: Tensor + TensorOps<T>> BertPooler<T> {
     }
 }
 
-pub struct BertClassifier<T: Tensor + TensorOps<T>> {
+/// TODO
+pub struct BertClassifier<T: Tensor + BertOps<T>> {
     bert: Bert<T>,
     pooler: BertPooler<T>,
     classifier: Linear<T>,
 }
 
-impl<T: Tensor + TensorOps<T>> BertClassifier<T> {
+impl<T: Tensor + BertOps<T> + TensorAttention<T>> BertClassifier<T> {
+    /// TODO
     pub fn new(bert: Bert<T>, pooler: BertPooler<T>, classifier: Linear<T>) -> Self {
         Self {
             bert,
@@ -256,6 +301,8 @@ impl<T: Tensor + TensorOps<T>> BertClassifier<T> {
             classifier,
         }
     }
+
+    /// TODO
     pub fn forward(&self, input_ids: &[usize], type_ids: &[usize]) -> Result<T, SmeltError> {
         let tensor = self.bert.forward(input_ids, type_ids)?;
         let tensor = self.pooler.forward(&tensor)?;

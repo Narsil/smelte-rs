@@ -14,7 +14,7 @@ pub fn select<'a>(ids: &[usize], weights: &Tensor<'a>) -> Result<Tensor<'a>, Sme
     let hidden_dim = weights.shape()[1];
     let mut out = Tensor::zeros(vec![sequence_length, hidden_dim]);
     for (i, id) in ids.iter().enumerate() {
-        let id = *id as usize;
+        let id = *id;
         if id >= vocab_size {
             return Err(SmeltError::OutOfVocabulary { vocab_size, id });
         }

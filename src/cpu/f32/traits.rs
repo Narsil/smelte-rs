@@ -53,13 +53,15 @@ impl<'a> TensorSelect<Tensor<'a>> for Tensor<'a> {
 
 impl<'a> TensorGelu<Tensor<'a>> for Tensor<'a> {
     fn gelu(x: &mut Tensor<'a>) -> Result<(), SmeltError> {
-        ops::apply(x, ops::gelu)
+        ops::apply(x, ops::gelu);
+        Ok(())
     }
 }
 
 impl<'a> TensorTanh<Tensor<'a>> for Tensor<'a> {
     fn tanh(x: &mut Tensor<'a>) -> Result<(), SmeltError> {
-        ops::apply(x, ops::inline_tanh)
+        ops::apply(x, ops::inline_tanh);
+        Ok(())
     }
 }
 
