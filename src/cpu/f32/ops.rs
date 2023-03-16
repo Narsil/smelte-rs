@@ -98,6 +98,9 @@ fn g_matmul<'a, const TRANSPOSE: bool>(
         });
     }
 
+    // Zero out c
+    c.data_mut().iter_mut().for_each(|v| *v = 0.0);
+
     let batching: usize = a.shape()[..dim - 2].iter().product();
     let a_skip: usize = m * k;
     let b_skip: usize = n * k;
@@ -217,7 +220,7 @@ pub fn normalize(x: &mut Tensor, epsilon: f32) -> Result<(), SmeltError> {
         let sum: f32 = chunk.iter().sum();
         let mean = sum / size as f32;
         chunk.iter_mut().for_each(|v| *v -= mean);
-        let var: f32 = chunk.iter().map(|v| v.powf(2.0)).sum();
+        let var: f32 = chunk.iter().map(|v| v * v).sum();
         let var = var / size as f32;
         let stddev: f32 = (var + epsilon).sqrt();
         chunk.iter_mut().for_each(|v| *v /= stddev);
@@ -351,6 +354,8 @@ mod tests {
         let data = vec![0.0; 4];
         let mut c = Tensor::new(data, vec![2, 2]).unwrap();
 
+        matmul(&a, &b, &mut c).unwrap();
+        assert_eq!(c.data(), &[7.0, 10.0, 15.0, 22.0]);
         matmul(&a, &b, &mut c).unwrap();
         assert_eq!(c.data(), &[7.0, 10.0, 15.0, 22.0]);
 

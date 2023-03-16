@@ -3,6 +3,26 @@ use crate::nn::layers::{Embedding, LayerNorm, Linear};
 use crate::traits::{Tensor, TensorOps};
 use crate::SmeltError;
 
+macro_rules! debug {
+    // `()` indicates that the macro takes no argument.
+    ($str: expr, $tensor: expr) => {
+        // The macro will expand into the contents of this block.
+        // println!(
+        //     "{} {:?}..{:?}",
+        //     $str,
+        //     &$tensor.data()[..3],
+        //     &$tensor.data()[$tensor.data().len() - 3..]
+        // );
+        // let n = $tensor.data().len();
+        // println!(
+        //     "{} {:?}..{:?}",
+        //     $str,
+        //     &$tensor.data()[..3],
+        //     &$tensor.data()[n - 768 * 3..n - 768 * 3 + 3]
+        // );
+    };
+}
+
 /// TODO
 pub struct BertContext<T: Tensor> {
     input_ids: Vec<usize>,
@@ -15,7 +35,6 @@ pub struct BertContext<T: Tensor> {
     hidden_states_copy: T,
     // Store the hidden_states after the attention (prevents a clone in the skip connection)
     hidden_states_attn_output: T,
-    // Store the q splitted_heads
     q_cache: T,
     // Store the k splitted_heads
     k_cache: T,
@@ -23,27 +42,33 @@ pub struct BertContext<T: Tensor> {
     v_cache: T,
     // Store the qk result
     qk: T,
+    qkv: T,
     // Intermediate states (H, 4H)
     intermediate_states: T,
     pool: T,
     pool_output: T,
-    logits: T,
+    probs: T,
+}
+
+impl<T: Tensor> BertContext<T> {
+    /// TODO
+    pub fn probs(&self) -> &T {
+        &self.probs
+    }
 }
 
 fn split_heads(q: &F32Tensor, out_q: &mut F32Tensor) -> Result<(), SmeltError> {
     let num_heads = out_q.shape()[0];
     let sequence_length = out_q.shape()[1];
-    let head_dim = out_q.shape()[1];
+    let head_dim = out_q.shape()[2];
     let hidden_dim = head_dim * num_heads;
 
-    let query_data = out_q.data_mut();
     (0..num_heads).for_each(|i| {
         (0..sequence_length).for_each(|j| {
             (0..head_dim).for_each(|k| {
                 let index = j * hidden_dim + i * head_dim + k;
                 let out_index = i * sequence_length * head_dim + j * head_dim + k;
-                let value = q.data()[index];
-                query_data[out_index] = value;
+                out_q.data_mut()[out_index] = q.data()[index];
             });
         });
     });
@@ -61,22 +86,32 @@ where
 {
     q_weights.forward(&ctx.hidden_states, &mut ctx.hidden_states_copy)?;
     split_heads(&ctx.hidden_states_copy, &mut ctx.q_cache)?;
+
+    debug!("Q head splitted", ctx.q_cache);
+
     k_weights.forward(&ctx.hidden_states, &mut ctx.hidden_states_copy)?;
     split_heads(&ctx.hidden_states_copy, &mut ctx.k_cache)?;
+
+    debug!("K head splitted", ctx.k_cache);
+
     v_weights.forward(&ctx.hidden_states, &mut ctx.hidden_states_copy)?;
     split_heads(&ctx.hidden_states_copy, &mut ctx.v_cache)?;
 
+    debug!("V head splitted", ctx.v_cache);
+
     matmul_t(&ctx.q_cache, &ctx.k_cache, &mut ctx.qk).unwrap();
 
-    let num_heads = ctx.qk.shape()[0];
-    let sequence_length = ctx.qk.shape()[1];
-    let head_dim = ctx.qk.shape()[2];
+    let num_heads = ctx.q_cache.shape()[0];
+    let sequence_length = ctx.q_cache.shape()[1];
+    let head_dim = ctx.q_cache.shape()[2];
     let hidden_dim = head_dim * num_heads;
     let scale = (head_dim as f32).sqrt();
     ctx.qk.data_mut().iter_mut().for_each(|v| *v /= scale);
 
     softmax(&mut ctx.qk).unwrap();
-    matmul(&ctx.qk, &ctx.q_cache, &mut ctx.hidden_states_copy).unwrap();
+    debug!("attention_probs", ctx.qk);
+    matmul(&ctx.qk, &ctx.v_cache, &mut ctx.qkv).unwrap();
+    debug!("qkv", ctx.qkv);
 
     let new_out = &mut ctx.hidden_states_attn_output.data_mut();
     (0..num_heads).for_each(|i| {
@@ -84,10 +119,12 @@ where
             (0..head_dim).for_each(|k| {
                 let in_index = i * sequence_length * head_dim + j * head_dim + k;
                 let out_index = j * hidden_dim + i * head_dim + k;
-                new_out[out_index] = (ctx.hidden_states_copy).data()[in_index];
+                new_out[out_index] = (ctx.qkv).data()[in_index];
             });
         });
     });
+    debug!("qkv (reshaed)", ctx.hidden_states_attn_output);
+
     Ok(())
 }
 
@@ -95,27 +132,39 @@ where
 pub trait TensorAttention<T: Tensor> {
     /// TODO
     fn attention(
-        q: &Linear<T>,
-        k: &Linear<T>,
-        v: &Linear<T>,
+        query: &Linear<T>,
+        key: &Linear<T>,
+        value: &Linear<T>,
         ctx: &mut BertContext<T>,
     ) -> Result<(), SmeltError>;
 }
 
 impl<'a> TensorAttention<F32Tensor<'a>> for F32Tensor<'a> {
     fn attention(
-        q: &Linear<F32Tensor<'a>>,
-        k: &Linear<F32Tensor<'a>>,
-        v: &Linear<F32Tensor<'a>>,
+        query: &Linear<F32Tensor<'a>>,
+        key: &Linear<F32Tensor<'a>>,
+        value: &Linear<F32Tensor<'a>>,
         ctx: &mut BertContext<F32Tensor<'a>>,
     ) -> Result<(), SmeltError> {
-        attention(q, k, v, ctx)?;
+        attention(query, key, value, ctx)?;
         Ok(())
     }
 }
 
 /// TODO
-pub trait BertOps<T: Tensor>: TensorOps<T> + TensorAttention<T> {}
+pub trait Debug<T: Tensor> {
+    /// TODO
+    fn data(&self) -> &[f32];
+}
+
+impl<'a> Debug<F32Tensor<'a>> for F32Tensor<'a> {
+    fn data(&self) -> &[f32] {
+        self.data()
+    }
+}
+
+/// TODO
+pub trait BertOps<T: Tensor>: TensorOps<T> + TensorAttention<T> + Debug<T> {}
 
 impl<'a> BertOps<F32Tensor<'a>> for F32Tensor<'a> {}
 
@@ -179,13 +228,20 @@ impl<T: Tensor + BertOps<T>> Mlp<T> {
 
     /// TODO
     pub fn forward(&self, ctx: &mut BertContext<T>) -> Result<(), SmeltError> {
+        // println!("=====");
+        debug!("Before MLP", ctx.hidden_states);
         self.intermediate
             .forward(&ctx.hidden_states, &mut ctx.intermediate_states)?;
+        debug!("Intermediate ", ctx.intermediate_states);
         T::gelu(&mut ctx.intermediate_states)?;
+        debug!("Intermediate (gelu)", ctx.intermediate_states);
         self.output
             .forward(&ctx.intermediate_states, &mut ctx.hidden_states_copy)?;
+        debug!("output", ctx.hidden_states_copy);
         T::add(&ctx.hidden_states_copy, &mut ctx.hidden_states)?;
+        debug!("output (skip)", ctx.hidden_states);
         self.output_ln.forward(&mut ctx.hidden_states)?;
+        debug!("output ln", ctx.hidden_states);
         Ok(())
     }
 }
@@ -205,8 +261,13 @@ impl<T: Tensor + BertOps<T>> BertLayer<T> {
 
     /// TODO
     pub fn forward(&self, ctx: &mut BertContext<T>) -> Result<(), SmeltError> {
+        debug!("Before attention", ctx.hidden_states);
         self.attention.forward(ctx)?;
-        self.mlp.forward(ctx)
+        debug!("After attention", ctx.hidden_states);
+        self.mlp.forward(ctx)?;
+        debug!("After mlp", ctx.hidden_states);
+        // println!("---------");
+        Ok(())
     }
 }
 
@@ -261,6 +322,7 @@ impl<T: Tensor + BertOps<T>> BertEmbeddings<T> {
         let input_ids = &ctx.input_ids;
         let position_ids = &ctx.position_ids;
         let type_ids = &ctx.type_ids;
+
         if input_ids.len() != position_ids.len() {
             return Err(SmeltError::InvalidLength {
                 expected: input_ids.len(),
@@ -276,14 +338,24 @@ impl<T: Tensor + BertOps<T>> BertEmbeddings<T> {
 
         self.input_embeddings
             .forward(input_ids, &mut ctx.hidden_states)?;
-        self.position_embeddings
-            .forward(position_ids, &mut ctx.hidden_states_copy)?;
-        T::add(&ctx.hidden_states_copy, &mut ctx.hidden_states)?;
+
+        debug!("input embeddings", ctx.hidden_states);
 
         self.type_embeddings
             .forward(type_ids, &mut ctx.hidden_states_copy)?;
+        debug!("type embeddings", ctx.hidden_states_copy);
         T::add(&ctx.hidden_states_copy, &mut ctx.hidden_states)?;
+        debug!("After add type embeddings", ctx.hidden_states);
+
+        self.position_embeddings
+            .forward(position_ids, &mut ctx.hidden_states_copy)?;
+        debug!("position embeddings", ctx.hidden_states_copy);
+        T::add(&ctx.hidden_states_copy, &mut ctx.hidden_states)?;
+        debug!("After add position embeddings", ctx.hidden_states);
+
         self.layer_norm.forward(&mut ctx.hidden_states)?;
+
+        debug!("After embeddings", ctx.hidden_states);
         Ok(())
     }
 }
@@ -351,8 +423,57 @@ impl<T: Tensor + BertOps<T> + TensorAttention<T>> BertClassifier<T> {
     pub fn forward(&self, ctx: &mut BertContext<T>) -> Result<(), SmeltError> {
         self.bert.forward(ctx)?;
         self.pooler.forward(ctx)?;
-        self.classifier.forward(&ctx.pool_output, &mut ctx.logits)?;
-        T::softmax(&mut ctx.logits)?;
+        self.classifier.forward(&ctx.pool_output, &mut ctx.probs)?;
+        T::softmax(&mut ctx.probs)?;
         Ok(())
+    }
+
+    /// TODO
+    pub fn new_context(
+        &self,
+        input_ids: Vec<usize>,
+        position_ids: Vec<usize>,
+        type_ids: Vec<usize>,
+        num_heads: usize,
+    ) -> BertContext<T> {
+        let hidden_dim = self.bert.embeddings.input_embeddings.weight().shape()[1];
+        let intermediate_dim = self.bert.encoder.layers[0]
+            .mlp
+            .intermediate
+            .weight()
+            .shape()[0];
+        let num_classes = self.classifier.weight().shape()[0];
+        let head_dim = hidden_dim / num_heads;
+        let sequence_length = input_ids.len();
+
+        let hidden_states = T::zeros(vec![sequence_length, hidden_dim]);
+        let hidden_states_copy = T::zeros(vec![sequence_length, hidden_dim]);
+        let hidden_states_attn_output = T::zeros(vec![sequence_length, hidden_dim]);
+        let intermediate_states = T::zeros(vec![sequence_length, intermediate_dim]);
+        let q_cache = T::zeros(vec![num_heads, sequence_length, head_dim]);
+        let k_cache = T::zeros(vec![num_heads, sequence_length, head_dim]);
+        let v_cache = T::zeros(vec![num_heads, sequence_length, head_dim]);
+        let qk = T::zeros(vec![num_heads, sequence_length, sequence_length]);
+        let qkv = T::zeros(vec![num_heads, sequence_length, head_dim]);
+        let pool = T::zeros(vec![1, hidden_dim]);
+        let pool_output = T::zeros(vec![1, hidden_dim]);
+        let probs = T::zeros(vec![1, num_classes]);
+        BertContext {
+            input_ids,
+            position_ids,
+            type_ids,
+            hidden_states,
+            hidden_states_copy,
+            hidden_states_attn_output,
+            intermediate_states,
+            q_cache,
+            k_cache,
+            v_cache,
+            qk,
+            qkv,
+            pool,
+            pool_output,
+            probs,
+        }
     }
 }

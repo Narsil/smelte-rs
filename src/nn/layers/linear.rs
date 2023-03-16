@@ -20,6 +20,16 @@ impl<T: Tensor + TensorOps<T>> Linear<T> {
         T::add(&self.bias, out)?;
         Ok(())
     }
+
+    /// TODO
+    pub fn weight(&self) -> &T {
+        &self.weight
+    }
+
+    /// TODO
+    pub fn bias(&self) -> &T {
+        &self.bias
+    }
 }
 
 /// Linear layer, applies matmul(x, W) + b (also named conv1d sometimes)
