@@ -20,7 +20,7 @@ are now extremely heavy with no option to statically link against.
 Libraries like ONNX are great too, but when an operator is missing out, it's
 really hard to work against.
 
-For low level libraries. [ggm](https://github.com/ggerganov/ggml) is a great
+For low level libraries. [ggml](https://github.com/ggerganov/ggml) is a great
 library, no dependencies, extremely small binary size. It's actually an
 inspiration for this project ! But I'm not good enough C++ programmer to hack it
 efficiently enough. Also it's hard to use outside of the intended scope, for
