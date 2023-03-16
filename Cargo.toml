@@ -11,6 +11,18 @@ half = {version = "2.2.1", features=["num-traits"], optional=true}
 libc = { version = "0.2", default-features = false }
 num-traits = { version = "0.2.15", optional=true}
 
+[dev-dependencies]
+serde = { version = "1.0.152", features = ["serde_derive"] }
+serde_json = "1.0.91"
+safetensors = "0.3"
+thiserror = "1.0"
+memmap2 = "0.5"
+tokenizers = { git = "https://github.com/huggingface/tokenizers", branch="main", default-features=false, features=["onig"] }
+
 [features]
 intel-mkl = []
 f16 = ["dep:half", "dep:num-traits"]
+
+
+[[example]]
+name = "bert"
