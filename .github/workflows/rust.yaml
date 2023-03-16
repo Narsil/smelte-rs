@@ -21,6 +21,7 @@ jobs:
           override: true
 
       - run: sudo apt-get update -y && sudo apt-get install libatlas-base-dev
+        if: matrix.os == 'ubuntu-latest'
 
       - uses: Swatinem/rust-cache@v2
 
