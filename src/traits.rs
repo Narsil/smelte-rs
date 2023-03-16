@@ -25,13 +25,13 @@ pub trait TensorOps<T>:
 /// TODO
 pub trait TensorMatmul<T> {
     /// TODO
-    fn matmul(a: &T, b: &T) -> Result<T, SmeltError>;
+    fn matmul(a: &T, b: &T, c: &mut T) -> Result<(), SmeltError>;
 }
 
 /// TODO
 pub trait TensorMatmulT<T> {
     /// TODO
-    fn matmul_t(a: &T, b: &T) -> Result<T, SmeltError>;
+    fn matmul_t(a: &T, b: &T, c: &mut T) -> Result<(), SmeltError>;
 }
 
 /// TODO
@@ -55,7 +55,7 @@ pub trait TensorNormalize<T> {
 /// TODO
 pub trait TensorSelect<T> {
     /// TODO
-    fn select(x: &[usize], weight: &T) -> Result<T, SmeltError>;
+    fn select(x: &[usize], weight: &T, out: &mut T) -> Result<(), SmeltError>;
 }
 
 /// TODO

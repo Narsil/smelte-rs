@@ -15,14 +15,14 @@ impl<T: Tensor + TensorOps<T>> Linear<T> {
     }
 
     /// Forward pass
-    pub fn forward(&self, tensor: &T) -> Result<T, SmeltError> {
-        let mut out = T::matmul_t(tensor, &self.weight)?;
-        T::add(&self.bias, &mut out)?;
-        Ok(out)
+    pub fn forward(&self, tensor: &T, out: &mut T) -> Result<(), SmeltError> {
+        T::matmul_t(tensor, &self.weight, out)?;
+        T::add(&self.bias, out)?;
+        Ok(())
     }
 }
 
-/// LinearT layer, applies matmul(x, W) + b
+/// Linear layer, applies matmul(x, W) + b (also named conv1d sometimes)
 #[derive(Clone)]
 pub struct LinearT<T: Tensor> {
     weight: T,
@@ -36,14 +36,14 @@ impl<T: Tensor + TensorOps<T>> LinearT<T> {
     }
 
     /// Forward pass
-    pub fn forward(&self, tensor: &T) -> Result<T, SmeltError> {
-        let mut out = T::matmul(tensor, &self.weight)?;
-        T::add(&self.bias, &mut out)?;
-        Ok(out)
+    pub fn forward(&self, tensor: &T, out: &mut T) -> Result<(), SmeltError> {
+        T::matmul_t(tensor, &self.weight, out)?;
+        T::add(&self.bias, out)?;
+        Ok(())
     }
 }
 
-/// UnbiasedLinear layer, applies matmul(x, W) + b
+/// UnbiasedLinear layer, applies matmul(x, W.T)
 #[derive(Clone)]
 pub struct UnbiasedLinear<T: Tensor> {
     weight: T,
@@ -56,8 +56,9 @@ impl<T: Tensor + TensorOps<T>> UnbiasedLinear<T> {
     }
 
     /// Forward pass
-    pub fn forward(&self, tensor: &T) -> Result<T, SmeltError> {
-        T::matmul(tensor, &self.weight)
+    pub fn forward(&self, tensor: &T, out: &mut T) -> Result<(), SmeltError> {
+        T::matmul_t(tensor, &self.weight, out)?;
+        Ok(())
     }
 }
 
@@ -68,12 +69,13 @@ mod tests {
 
     #[test]
     fn test_linear() {
-        let mut zeros = Tensor::zeros(vec![2, 2]);
+        let zeros = Tensor::zeros(vec![2, 2]);
         let weights = Tensor::zeros(vec![3, 2]);
         let bias = Tensor::zeros(vec![3]);
+        let mut out = Tensor::zeros(vec![2, 3]);
 
-        let linear = LinearT::new(weights, bias);
+        let linear = Linear::new(weights, bias);
 
-        linear.forward(&mut zeros).unwrap();
+        linear.forward(&zeros, &mut out).unwrap();
     }
 }

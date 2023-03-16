@@ -34,20 +34,20 @@ impl<'a> TensorNormalize<Tensor<'a>> for Tensor<'a> {
 }
 
 impl<'a> TensorMatmul<Tensor<'a>> for Tensor<'a> {
-    fn matmul(x: &Self, y: &Self) -> Result<Tensor<'a>, SmeltError> {
-        ops::matmul(x, y)
+    fn matmul(x: &Self, y: &Self, out: &mut Self) -> Result<(), SmeltError> {
+        ops::matmul(x, y, out)
     }
 }
 
 impl<'a> TensorMatmulT<Tensor<'a>> for Tensor<'a> {
-    fn matmul_t(x: &Self, y: &Self) -> Result<Tensor<'a>, SmeltError> {
-        ops::matmul_t(x, y)
+    fn matmul_t(x: &Self, y: &Self, out: &mut Self) -> Result<(), SmeltError> {
+        ops::matmul_t(x, y, out)
     }
 }
 
 impl<'a> TensorSelect<Tensor<'a>> for Tensor<'a> {
-    fn select(x: &[usize], weight: &Tensor<'a>) -> Result<Tensor<'a>, SmeltError> {
-        ops::select(x, weight)
+    fn select(x: &[usize], weight: &Self, out: &mut Self) -> Result<(), SmeltError> {
+        ops::select(x, weight, out)
     }
 }
 

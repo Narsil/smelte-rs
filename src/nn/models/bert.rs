@@ -3,12 +3,40 @@ use crate::nn::layers::{Embedding, LayerNorm, Linear};
 use crate::traits::{Tensor, TensorOps};
 use crate::SmeltError;
 
-fn split_heads<'a>(q: &'a F32Tensor<'a>, num_heads: usize) -> F32Tensor<'a> {
-    let sequence_length = q.shape()[0];
-    let hidden_dim = q.shape()[1];
-    assert_eq!(hidden_dim % num_heads, 0);
-    let head_dim = hidden_dim / num_heads;
-    let mut query_data = vec![0.0; num_heads * sequence_length * head_dim];
+/// TODO
+pub struct BertContext<T: Tensor> {
+    input_ids: Vec<usize>,
+    type_ids: Vec<usize>,
+    position_ids: Vec<usize>,
+    hidden_states: T,
+    // Required to compute position_ids before adding into hidden_states
+    // - Used in the MLP to prevent cloning the skip connection
+    // - Used in the attention for the output Linear layer
+    hidden_states_copy: T,
+    // Store the hidden_states after the attention (prevents a clone in the skip connection)
+    hidden_states_attn_output: T,
+    // Store the q splitted_heads
+    q_cache: T,
+    // Store the k splitted_heads
+    k_cache: T,
+    // Store the k splitted_heads
+    v_cache: T,
+    // Store the qk result
+    qk: T,
+    // Intermediate states (H, 4H)
+    intermediate_states: T,
+    pool: T,
+    pool_output: T,
+    logits: T,
+}
+
+fn split_heads(q: &F32Tensor, out_q: &mut F32Tensor) -> Result<(), SmeltError> {
+    let num_heads = out_q.shape()[0];
+    let sequence_length = out_q.shape()[1];
+    let head_dim = out_q.shape()[1];
+    let hidden_dim = head_dim * num_heads;
+
+    let query_data = out_q.data_mut();
     (0..num_heads).for_each(|i| {
         (0..sequence_length).for_each(|j| {
             (0..head_dim).for_each(|k| {
@@ -19,63 +47,75 @@ fn split_heads<'a>(q: &'a F32Tensor<'a>, num_heads: usize) -> F32Tensor<'a> {
             });
         });
     });
-    F32Tensor::new(query_data, vec![num_heads, sequence_length, head_dim]).unwrap()
+    Ok(())
 }
 
-fn attention<'a>(
-    query: &F32Tensor<'a>,
-    key: &F32Tensor<'a>,
-    value: &F32Tensor<'a>,
-    num_heads: usize,
-) -> F32Tensor<'a> {
-    let sequence_length = query.shape()[0];
-    let hidden_dim = query.shape()[1];
-    assert_eq!(hidden_dim % num_heads, 0);
+fn attention<'data, 'ctx>(
+    q_weights: &Linear<F32Tensor<'data>>,
+    k_weights: &Linear<F32Tensor<'data>>,
+    v_weights: &Linear<F32Tensor<'data>>,
+    ctx: &mut BertContext<F32Tensor<'ctx>>,
+) -> Result<(), SmeltError>
+where
+    'data: 'ctx,
+{
+    q_weights.forward(&ctx.hidden_states, &mut ctx.hidden_states_copy)?;
+    split_heads(&ctx.hidden_states_copy, &mut ctx.q_cache)?;
+    k_weights.forward(&ctx.hidden_states, &mut ctx.hidden_states_copy)?;
+    split_heads(&ctx.hidden_states_copy, &mut ctx.k_cache)?;
+    v_weights.forward(&ctx.hidden_states, &mut ctx.hidden_states_copy)?;
+    split_heads(&ctx.hidden_states_copy, &mut ctx.v_cache)?;
 
-    let query = split_heads(query, num_heads);
-    let key = split_heads(key, num_heads);
-    let value = split_heads(value, num_heads);
+    matmul_t(&ctx.q_cache, &ctx.k_cache, &mut ctx.qk).unwrap();
 
-    let mut qk = matmul_t(&query, &key).unwrap();
-    let head_dim = hidden_dim / num_heads;
+    let num_heads = ctx.qk.shape()[0];
+    let sequence_length = ctx.qk.shape()[1];
+    let head_dim = ctx.qk.shape()[2];
+    let hidden_dim = head_dim * num_heads;
     let scale = (head_dim as f32).sqrt();
-    qk.data_mut().iter_mut().for_each(|v| *v /= scale);
+    ctx.qk.data_mut().iter_mut().for_each(|v| *v /= scale);
 
-    softmax(&mut qk).unwrap();
-    let out = matmul(&qk, &value).unwrap();
+    softmax(&mut ctx.qk).unwrap();
+    matmul(&ctx.qk, &ctx.q_cache, &mut ctx.hidden_states_copy).unwrap();
 
-    let mut new_out = vec![0.0; sequence_length * hidden_dim];
+    let new_out = &mut ctx.hidden_states_attn_output.data_mut();
     (0..num_heads).for_each(|i| {
         (0..sequence_length).for_each(|j| {
             (0..head_dim).for_each(|k| {
                 let in_index = i * sequence_length * head_dim + j * head_dim + k;
                 let out_index = j * hidden_dim + i * head_dim + k;
-                new_out[out_index] = out.data()[in_index];
+                new_out[out_index] = (ctx.hidden_states_copy).data()[in_index];
             });
         });
     });
-    F32Tensor::new(new_out, vec![sequence_length, hidden_dim]).unwrap()
+    Ok(())
 }
 
 /// TODO
-pub trait TensorAttention<T> {
+pub trait TensorAttention<T: Tensor> {
     /// TODO
-    fn attention(q: &T, k: &T, v: &T, num_heads: usize) -> Result<T, SmeltError>;
+    fn attention(
+        q: &Linear<T>,
+        k: &Linear<T>,
+        v: &Linear<T>,
+        ctx: &mut BertContext<T>,
+    ) -> Result<(), SmeltError>;
 }
 
 impl<'a> TensorAttention<F32Tensor<'a>> for F32Tensor<'a> {
     fn attention(
-        q: &F32Tensor<'a>,
-        k: &F32Tensor<'a>,
-        v: &F32Tensor<'a>,
-        num_heads: usize,
-    ) -> Result<F32Tensor<'a>, SmeltError> {
-        Ok(attention(q, k, v, num_heads))
+        q: &Linear<F32Tensor<'a>>,
+        k: &Linear<F32Tensor<'a>>,
+        v: &Linear<F32Tensor<'a>>,
+        ctx: &mut BertContext<F32Tensor<'a>>,
+    ) -> Result<(), SmeltError> {
+        attention(q, k, v, ctx)?;
+        Ok(())
     }
 }
 
 /// TODO
-pub trait BertOps<T>: TensorOps<T> + TensorAttention<T> {}
+pub trait BertOps<T: Tensor>: TensorOps<T> + TensorAttention<T> {}
 
 impl<'a> BertOps<F32Tensor<'a>> for F32Tensor<'a> {}
 
@@ -87,7 +127,6 @@ pub struct BertAttention<T: Tensor> {
     value: Linear<T>,
     output: Linear<T>,
     output_ln: LayerNorm<T>,
-    num_heads: usize,
 }
 
 impl<T: Tensor + BertOps<T>> BertAttention<T> {
@@ -98,7 +137,6 @@ impl<T: Tensor + BertOps<T>> BertAttention<T> {
         value: Linear<T>,
         output: Linear<T>,
         output_ln: LayerNorm<T>,
-        num_heads: usize,
     ) -> Self {
         Self {
             query,
@@ -106,21 +144,18 @@ impl<T: Tensor + BertOps<T>> BertAttention<T> {
             value,
             output,
             output_ln,
-            num_heads,
         }
     }
 
     /// TODO
-    pub fn forward(&self, hidden_states: &T) -> Result<T, SmeltError> {
-        let q = self.query.forward(hidden_states)?;
-        let k = self.key.forward(hidden_states)?;
-        let v = self.value.forward(hidden_states)?;
+    pub fn forward(&self, ctx: &mut BertContext<T>) -> Result<(), SmeltError> {
+        T::attention(&self.query, &self.key, &self.value, ctx)?;
 
-        let attended = T::attention(&q, &k, &v, self.num_heads)?;
-        let mut tensor = self.output.forward(&attended)?;
-        T::add(hidden_states, &mut tensor)?;
-        self.output_ln.forward(&mut tensor)?;
-        Ok(tensor)
+        self.output
+            .forward(&ctx.hidden_states_attn_output, &mut ctx.hidden_states_copy)?;
+        T::add(&ctx.hidden_states_copy, &mut ctx.hidden_states)?;
+        self.output_ln.forward(&mut ctx.hidden_states)?;
+        Ok(())
     }
 }
 
@@ -143,14 +178,15 @@ impl<T: Tensor + BertOps<T>> Mlp<T> {
     }
 
     /// TODO
-    pub fn forward(&self, tensor: &T) -> Result<T, SmeltError> {
-        let input_tensor = tensor.clone();
-        let mut tensor = self.intermediate.forward(tensor)?;
-        T::gelu(&mut tensor)?;
-        let mut tensor = self.output.forward(&tensor)?;
-        T::add(&input_tensor, &mut tensor)?;
-        self.output_ln.forward(&mut tensor)?;
-        Ok(tensor)
+    pub fn forward(&self, ctx: &mut BertContext<T>) -> Result<(), SmeltError> {
+        self.intermediate
+            .forward(&ctx.hidden_states, &mut ctx.intermediate_states)?;
+        T::gelu(&mut ctx.intermediate_states)?;
+        self.output
+            .forward(&ctx.intermediate_states, &mut ctx.hidden_states_copy)?;
+        T::add(&ctx.hidden_states_copy, &mut ctx.hidden_states)?;
+        self.output_ln.forward(&mut ctx.hidden_states)?;
+        Ok(())
     }
 }
 
@@ -168,9 +204,9 @@ impl<T: Tensor + BertOps<T>> BertLayer<T> {
     }
 
     /// TODO
-    pub fn forward(&self, tensor: &T) -> Result<T, SmeltError> {
-        let tensor = self.attention.forward(tensor)?;
-        self.mlp.forward(&tensor)
+    pub fn forward(&self, ctx: &mut BertContext<T>) -> Result<(), SmeltError> {
+        self.attention.forward(ctx)?;
+        self.mlp.forward(ctx)
     }
 }
 
@@ -187,12 +223,11 @@ impl<T: Tensor + BertOps<T>> BertEncoder<T> {
     }
 
     /// TODO
-    pub fn forward(&self, tensor: &T) -> Result<T, SmeltError> {
-        let mut tensor = self.layers[0].forward(tensor)?;
-        for layer in &self.layers[1..] {
-            tensor = layer.forward(&tensor)?;
+    pub fn forward(&self, ctx: &mut BertContext<T>) -> Result<(), SmeltError> {
+        for layer in &self.layers {
+            layer.forward(ctx)?;
         }
-        Ok(tensor)
+        Ok(())
     }
 }
 
@@ -222,7 +257,16 @@ impl<T: Tensor + BertOps<T>> BertEmbeddings<T> {
     }
 
     /// TODO
-    pub fn forward(&self, input_ids: &[usize], type_ids: &[usize]) -> Result<T, SmeltError> {
+    pub fn forward(&self, ctx: &mut BertContext<T>) -> Result<(), SmeltError> {
+        let input_ids = &ctx.input_ids;
+        let position_ids = &ctx.position_ids;
+        let type_ids = &ctx.type_ids;
+        if input_ids.len() != position_ids.len() {
+            return Err(SmeltError::InvalidLength {
+                expected: input_ids.len(),
+                got: position_ids.len(),
+            });
+        }
         if input_ids.len() != type_ids.len() {
             return Err(SmeltError::InvalidLength {
                 expected: input_ids.len(),
@@ -230,16 +274,17 @@ impl<T: Tensor + BertOps<T>> BertEmbeddings<T> {
             });
         }
 
-        let positions: Vec<usize> = (0..input_ids.len()).collect();
+        self.input_embeddings
+            .forward(input_ids, &mut ctx.hidden_states)?;
+        self.position_embeddings
+            .forward(position_ids, &mut ctx.hidden_states_copy)?;
+        T::add(&ctx.hidden_states_copy, &mut ctx.hidden_states)?;
 
-        let mut input_embeds = self.input_embeddings.forward(input_ids)?;
-        let position_embeds = self.position_embeddings.forward(&positions[..])?;
-        let type_embeds = self.type_embeddings.forward(type_ids)?;
-
-        T::add(&position_embeds, &mut input_embeds)?;
-        T::add(&type_embeds, &mut input_embeds)?;
-        self.layer_norm.forward(&mut input_embeds)?;
-        Ok(input_embeds)
+        self.type_embeddings
+            .forward(type_ids, &mut ctx.hidden_states_copy)?;
+        T::add(&ctx.hidden_states_copy, &mut ctx.hidden_states)?;
+        self.layer_norm.forward(&mut ctx.hidden_states)?;
+        Ok(())
     }
 }
 
@@ -258,9 +303,9 @@ impl<T: Tensor + BertOps<T>> Bert<T> {
         }
     }
     /// TODO
-    pub fn forward(&self, input_ids: &[usize], type_ids: &[usize]) -> Result<T, SmeltError> {
-        let tensor = self.embeddings.forward(input_ids, type_ids)?;
-        self.encoder.forward(&tensor)
+    pub fn forward(&self, ctx: &mut BertContext<T>) -> Result<(), SmeltError> {
+        self.embeddings.forward(ctx)?;
+        self.encoder.forward(ctx)
     }
 }
 
@@ -277,11 +322,11 @@ impl<T: Tensor + BertOps<T>> BertPooler<T> {
     }
 
     /// TODO
-    pub fn forward(&self, tensor: &T) -> Result<T, SmeltError> {
-        let first = T::select(&[0], tensor)?;
-        let mut tensor = self.pooler.forward(&first)?;
-        T::tanh(&mut tensor)?;
-        Ok(tensor)
+    pub fn forward(&self, ctx: &mut BertContext<T>) -> Result<(), SmeltError> {
+        T::select(&[0], &ctx.hidden_states, &mut ctx.pool)?;
+        self.pooler.forward(&ctx.pool, &mut ctx.pool_output)?;
+        T::tanh(&mut ctx.pool_output)?;
+        Ok(())
     }
 }
 
@@ -303,11 +348,11 @@ impl<T: Tensor + BertOps<T> + TensorAttention<T>> BertClassifier<T> {
     }
 
     /// TODO
-    pub fn forward(&self, input_ids: &[usize], type_ids: &[usize]) -> Result<T, SmeltError> {
-        let tensor = self.bert.forward(input_ids, type_ids)?;
-        let tensor = self.pooler.forward(&tensor)?;
-        let mut logits = self.classifier.forward(&tensor)?;
-        T::softmax(&mut logits)?;
-        Ok(logits)
+    pub fn forward(&self, ctx: &mut BertContext<T>) -> Result<(), SmeltError> {
+        self.bert.forward(ctx)?;
+        self.pooler.forward(ctx)?;
+        self.classifier.forward(&ctx.pool_output, &mut ctx.logits)?;
+        T::softmax(&mut ctx.logits)?;
+        Ok(())
     }
 }

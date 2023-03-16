@@ -14,8 +14,8 @@ impl<T: Tensor + TensorOps<T>> Embedding<T> {
     }
 
     /// TODO
-    pub fn forward(&self, ids: &[usize]) -> Result<T, SmeltError> {
-        T::select(ids, &self.weight)
+    pub fn forward(&self, ids: &[usize], out: &mut T) -> Result<(), SmeltError> {
+        T::select(ids, &self.weight, out)
     }
 }
 
@@ -28,13 +28,15 @@ mod tests {
     fn test_embedding() {
         let weights = Tensor::zeros(vec![3, 2]);
         let embedding = Embedding::new(weights);
-        let _out = embedding.forward(&[0, 1]).unwrap();
+        let mut out = Tensor::zeros(vec![2, 2]);
+        embedding.forward(&[0, 1], &mut out).unwrap();
     }
 
     #[test]
     fn test_embedding_errors() {
         let weights = Tensor::zeros(vec![3, 2]);
         let embedding = Embedding::new(weights);
-        assert!(embedding.forward(&[3]).is_err());
+        let mut out = Tensor::zeros(vec![2, 2]);
+        assert!(embedding.forward(&[3], &mut out).is_err());
     }
 }
