@@ -20,7 +20,11 @@ jobs:
           components: rustfmt, clippy
           override: true
 
+      - run: sudo apt-get update -y && sudo apt-get install libatlas-base-dev
+
       - uses: Swatinem/rust-cache@v2
+
+
 
       - name: Install cargo-readme for Ubuntu
         if: matrix.os == 'ubuntu-latest'
