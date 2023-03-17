@@ -6,7 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-cblas-sys = { version = "0.1.4", default-features = false }
+cblas-sys = { version = "0.1.4", default-features = false, optional = true }
+matrixmultiply = { version = "0.3.2", default-features = false, optional = true }
 half = {version = "2.2.1", features=["num-traits"], optional=true}
 libc = { version = "0.2", default-features = false }
 num-traits = { version = "0.2.15", optional=true}
@@ -20,7 +21,9 @@ memmap2 = "0.5"
 tokenizers = { git = "https://github.com/huggingface/tokenizers", branch="main", default-features=false, features=["onig"] }
 
 [features]
-intel-mkl = []
+default = ["cblas"]
+cblas = ["cblas-sys"]
+intel-mkl = ["cblas"]
 f16 = ["dep:half", "dep:num-traits"]
 
 
