@@ -16,13 +16,16 @@ Keep unsafe usage limited and only for performance.
 
 Try running Bert on text classification example.
 
-```rust
+```bash
+# Download the model + tokenizer + config
 curl https://huggingface.co/{model_id}/resolve/main/model.safetensors -o model-{model_id_slug}.safetensors -L
 curl https://huggingface.co/{model_id}/resolve/main/tokenizer.json -o tokenizer-{model_id_slug}.json -L
 curl https://huggingface.co/{model_id}/resolve/main/config.json -o config-{model_id_slug}.json -L
 
+# Linux
 cargo run --example bert --release --features intel-mkl -- "This is a test" -n 3
 
+# M1
 cargo run --example bert --release -- "This is a test" -n 3
 ```
 
