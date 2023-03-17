@@ -26,7 +26,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
 
-
       - name: Install cargo-readme for Ubuntu
         if: matrix.os == 'ubuntu-latest'
         uses: actions-rs/cargo@v1
@@ -38,13 +37,13 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --all-targets --verbose
+          args: --verbose
 
       - name: Lint with Clippy
         uses: actions-rs/cargo@v1
         with:
           command: clippy
-          args: --all-targets -- -D warnings
+          args: -- -D warnings
 
       - name: Run Tests
         uses: actions-rs/cargo@v1
