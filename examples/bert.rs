@@ -4,12 +4,12 @@ use safetensors::{
     SafeTensors,
 };
 use serde::Deserialize;
-use smelte-rs::cpu::f32::Tensor;
-use smelte-rs::nn::layers::{Embedding, LayerNorm, Linear};
-use smelte-rs::nn::models::bert::{
+use smelte_rs::cpu::f32::Tensor;
+use smelte_rs::nn::layers::{Embedding, LayerNorm, Linear};
+use smelte_rs::nn::models::bert::{
     Bert, BertAttention, BertClassifier, BertEmbeddings, BertEncoder, BertLayer, BertPooler, Mlp,
 };
-use smelte-rs::TensorError;
+use smelte_rs::TensorError;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs::File;

@@ -49,6 +49,18 @@ which while extremely powerful (compile time size checking) it was getting
 in the way of getting things done, and optimizing for it is not as trivial as
 it's harder to know what's going on.
 
+## Important missing features
+
+- [ ] GPU support
+- [ ] f16 support
+- [ ] q4_0 support (akin to ggml)
+- [ ] remove blas/intel-mkl dependency (write the intrinsics ourselves)
+- [ ] Add more models
+  - [ ] Roberta for <https://huggingface.co/roberta-base-openai-detector>
+  - [ ] Distilbert
+  - [ ] Gpt2 (Almost done)
+  - [ ] Llama
+
 ## The architecture of this library:
 
 - [cpu] is containing all the various precisions backend operations, tensor structs.
