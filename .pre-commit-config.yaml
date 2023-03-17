@@ -1,6 +1,6 @@
 repos:
   - repo: https://github.com/Narsil/pre-commit-rust
-    rev: 0c016cee78144d06d906fccc7715d607a946ca5c
+    rev: 2eed6366172ef2a5186e8785ec0e67243d7d73d0
     hooks:
       - id: fmt
         name: "Rust (fmt)"
@@ -12,14 +12,7 @@ repos:
             "-Dwarnings",
           ]
   - repo: https://github.com/Narsil/pre-commit-rust
-    rev: 0c016cee78144d06d906fccc7715d607a946ca5c
+    rev: 2f7503ed401b0c8d854d5118a4624149fda89afc
     hooks:
-      - id: fmt
-        name: "Python (fmt)"
-      - id: clippy
-        name: "Python (clippy)"
-        args:
-          [
-            "--",
-            "-Dwarnings",
-          ]
+      - id: cargo-readme
+        name: "Rust (Readme)"
