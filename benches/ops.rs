@@ -1,7 +1,7 @@
 #![feature(test)]
 
 extern crate test;
-use smelte-rs::cpu::f32::{apply, gelu, normalize, softmax, Tensor};
+use smelte_rs::cpu::f32::{apply, gelu, normalize, softmax, Tensor};
 use test::{black_box, Bencher};
 
 #[bench]

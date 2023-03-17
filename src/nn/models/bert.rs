@@ -407,6 +407,7 @@ pub struct BertClassifier<T: Tensor + BertOps<T>> {
     bert: Bert<T>,
     pooler: BertPooler<T>,
     classifier: Linear<T>,
+    num_heads: usize,
 }
 
 impl<T: Tensor + BertOps<T> + TensorAttention<T>> BertClassifier<T> {
@@ -416,7 +417,13 @@ impl<T: Tensor + BertOps<T> + TensorAttention<T>> BertClassifier<T> {
             bert,
             pooler,
             classifier,
+            num_heads: 0,
         }
+    }
+
+    /// TODO
+    pub fn set_num_heads(&mut self, num_heads: usize) {
+        self.num_heads = num_heads
     }
 
     /// TODO
@@ -475,5 +482,17 @@ impl<T: Tensor + BertOps<T> + TensorAttention<T>> BertClassifier<T> {
             pool_output,
             probs,
         }
+    }
+
+    /// TODO
+    pub fn run(
+        &self,
+        input_ids: Vec<usize>,
+        position_ids: Vec<usize>,
+        type_ids: Vec<usize>,
+    ) -> Result<T, SmeltError> {
+        let mut context = self.new_context(input_ids, position_ids, type_ids, self.num_heads);
+        self.forward(&mut context)?;
+        Ok(context.probs)
     }
 }
