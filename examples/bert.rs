@@ -4,12 +4,12 @@ use safetensors::{
     SafeTensors,
 };
 use serde::Deserialize;
-use smelte-rs::cpu::f32::Tensor;
-use smelte-rs::nn::layers::{Embedding, LayerNorm, Linear};
-use smelte-rs::nn::models::bert::{
+use smelte_rs::cpu::f32::Tensor;
+use smelte_rs::nn::layers::{Embedding, LayerNorm, Linear};
+use smelte_rs::nn::models::bert::{
     Bert, BertAttention, BertClassifier, BertEmbeddings, BertEncoder, BertLayer, BertPooler, Mlp,
 };
-use smelte-rs::TensorError;
+use smelte_rs::TensorError;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs::File;
@@ -113,7 +113,8 @@ pub fn main() -> Result<(), BertError> {
     let config_str: String = std::fs::read_to_string(filename).expect("Could not read config");
     let config: Config = serde_json::from_str(&config_str).expect("Could not parse Config");
 
-    let bert = BertClassifier::from_tensors(&tensors);
+    let mut bert = BertClassifier::from_tensors(&tensors);
+    bert.set_num_heads(config.num_attention_heads);
     println!("Loaded {:?}", start.elapsed());
 
     let encoded = tokenizer.encode(string.clone(), false).unwrap();
@@ -121,21 +122,13 @@ pub fn main() -> Result<(), BertError> {
 
     println!("Loaded & encoded {:?}", start.elapsed());
 
-    let input_ids: Vec<_> = encoded.get_ids().iter().map(|i| *i as usize).collect();
-    let position_ids: Vec<_> = (0..input_ids.len()).collect();
-    let type_ids: Vec<_> = encoded.get_type_ids().iter().map(|i| *i as usize).collect();
-    let mut context = bert.new_context(
-        input_ids,
-        position_ids,
-        type_ids,
-        config.num_attention_heads,
-    );
     for _ in 0..n {
         println!("Running bert inference on `{string:?}`");
         let inference_start = std::time::Instant::now();
-        bert.forward(&mut context).unwrap();
-
-        let probs = context.probs();
+        let input_ids: Vec<_> = encoded.get_ids().iter().map(|i| *i as usize).collect();
+        let position_ids: Vec<_> = (0..input_ids.len()).collect();
+        let type_ids: Vec<_> = encoded.get_type_ids().iter().map(|i| *i as usize).collect();
+        let probs = bert.run(input_ids, position_ids, type_ids).unwrap();
 
         let id2label = config.id2label();
         let mut outputs: Vec<_> = probs
