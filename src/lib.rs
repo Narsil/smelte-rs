@@ -12,9 +12,10 @@
 //!
 //! ```bash
 //! # Download the model + tokenizer + config
-//! curl https://huggingface.co/{model_id}/resolve/main/model.safetensors -o model-{model_id_slug}.safetensors -L
-//! curl https://huggingface.co/{model_id}/resolve/main/tokenizer.json -o tokenizer-{model_id_slug}.json -L
-//! curl https://huggingface.co/{model_id}/resolve/main/config.json -o config-{model_id_slug}.json -L
+//! # This is a clone of https://huggingface.co/ProsusAI/finbert with safetensors support.
+//! curl https://huggingface.co/Narsil/finbert/resolve/main/model.safetensors -o model-Narsil-finbert.safetensors -L
+//! curl https://huggingface.co/Narsil/finbert/resolve/main/tokenizer.json -o tokenizer-Narsil-finbert.json -L
+//! curl https://huggingface.co/Narsil/finbert/resolve/main/config.json -o config-Narsil-finbert.json -L
 //!
 //! # Linux
 //! cargo run --example bert --release --features intel-mkl -- "This is a test" -n 3
