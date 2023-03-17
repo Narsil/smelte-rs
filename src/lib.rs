@@ -11,7 +11,6 @@
 //! Try running Bert on text classification example.
 //!
 //! ```bash
-//! # toto
 //! # Download the model + tokenizer + config
 //! curl https://huggingface.co/{model_id}/resolve/main/model.safetensors -o model-{model_id_slug}.safetensors -L
 //! curl https://huggingface.co/{model_id}/resolve/main/tokenizer.json -o tokenizer-{model_id_slug}.json -L
