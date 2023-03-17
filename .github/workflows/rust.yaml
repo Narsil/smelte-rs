@@ -62,6 +62,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         shell: bash
         run: cargo readme > must_match_readme.md && diff must_match_readme.md README.md
+
   window_build:
     runs-on: windows-latest
     steps:
@@ -94,7 +95,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: clippy
-          args:--no-default-features --features matrixmultiply  -- -D warnings
+          args: --no-default-features --features matrixmultiply  -- -D warnings
 
       - name: Run Tests
         uses: actions-rs/cargo@v1
