@@ -1,3 +1,8 @@
+[![Crates.io](https://img.shields.io/crates/v/smelt.svg)](https://crates.io/crates/smelt)
+[![Documentation](https://docs.rs/smelt/badge.svg)](https://docs.rs/smelt/)
+[![Codecov](https://codecov.io/github/Narsil/smelt/coverage.svg?branch=main)](https://codecov.io/gh/Narsil/smelt)
+[![Dependency status](https://deps.rs/repo/github/Narsil/smelt/status.svg)](https://deps.rs/repo/github/Narsil/smelt)
+
 # smelt
 
 ## What is smelt ?
@@ -9,20 +14,31 @@ Keep unsafe usage limited and only for performance.
 
 ## Running models
 
-Go check out:
-- [gpt2](https://github.com/Narsil/fast_gpt2)
-- [bert](https://github.com/Narsil/fast_bert)
+Try running Bert on text classification example.
+
+```bash
+# Download the model + tokenizer + config
+curl https://huggingface.co/{model_id}/resolve/main/model.safetensors -o model-{model_id_slug}.safetensors -L
+curl https://huggingface.co/{model_id}/resolve/main/tokenizer.json -o tokenizer-{model_id_slug}.json -L
+curl https://huggingface.co/{model_id}/resolve/main/config.json -o config-{model_id_slug}.json -L
+
+# Linux
+cargo run --example bert --release --features intel-mkl -- "This is a test" -n 3
+
+# M1
+cargo run --example bert --release -- "This is a test" -n 3
+```
 
 ## Why not use library X ?
 
-Many other libraries for ML out there, torch and tensorflow are nice but
+Many other libraries for ML out there, torch and tensorflow are great but
 are now extremely heavy with no option to statically link against.
 Libraries like ONNX are great too, but when an operator is missing out, it's
 really hard to work against.
 
 For low level libraries. [ggml](https://github.com/ggerganov/ggml) is a great
 library, no dependencies, extremely small binary size. It's actually an
-inspiration for this project ! But I'm not good enough C++ programmer to hack it
+inspiration for this project ! But I'm not good enough a C++ programmer to hack it
 efficiently enough. Also it's hard to use outside of the intended scope, for
 instance when writing a webserver/API, or if we wanted to use CUDA as a backend.
 

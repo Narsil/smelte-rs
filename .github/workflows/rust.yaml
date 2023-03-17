@@ -1,0 +1,104 @@
+name: Rust
+
+on:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macOS-latest]
+
+    steps:
+      - uses: actions/checkout@v1
+
+      - name: Install Rust Stable
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+          override: true
+
+      - run: sudo apt-get update -y && sudo apt-get install libatlas-base-dev
+        if: matrix.os == 'ubuntu-latest'
+
+      - uses: Swatinem/rust-cache@v2
+
+
+      - name: Install cargo-readme for Ubuntu
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: cargo-readme
+
+      - name: Build
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --verbose
+
+      - name: Lint with Clippy
+        uses: actions-rs/cargo@v1
+        with:
+          command: clippy
+          args: -- -D warnings
+
+      - name: Run Tests
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --verbose
+
+      - name: Run Audit
+        uses: actions-rs/cargo@v1
+        with:
+          command: audit
+          args: -D warnings
+
+      # Verify that Readme.md is up to date.
+      - name: Make sure, Readme generated from lib.rs matches actual Readme
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: cargo readme > must_match_readme.md && diff must_match_readme.md README.md
+
+  window_build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v1
+
+      - name: Install Rust Stable
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+          override: true
+
+      - uses: Swatinem/rust-cache@v2
+
+
+      - name: Install cargo-readme for Ubuntu
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: cargo-readme
+
+      - name: Build
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --no-default-features --features matrixmultiply --verbose
+
+      - name: Lint with Clippy
+        uses: actions-rs/cargo@v1
+        with:
+          command: clippy
+          args: --no-default-features --features matrixmultiply  -- -D warnings
+
+      - name: Run Tests
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --no-default-features --features matrixmultiply  --verbose

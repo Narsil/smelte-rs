@@ -1,6 +1,10 @@
 use crate::cpu::f32::tensor::Tensor;
 use crate::SmeltError;
 
+#[cfg(feature = "matrixmultiply")]
+use matrixmultiply::sgemm;
+
+#[cfg(feature = "cblas")]
 use cblas_sys::{
     cblas_sgemm as sgemm, CblasColMajor as ColMajor, CblasNoTrans as NoTr,
     CblasRowMajor as RowMajor, CblasTrans as Tr,
@@ -121,6 +125,27 @@ fn g_matmul<'a, const TRANSPOSE: bool>(
         let bp = &b.data()[step * b_skip..];
         let cp = &mut c.data_mut()[step * c_skip..];
 
+        #[cfg(feature = "matrixmultiply")]
+        unsafe {
+            sgemm(
+                m,
+                k,
+                n,
+                1.0,
+                ap.as_ptr(),
+                ar,
+                ac,
+                bp.as_ptr(),
+                br,
+                bc,
+                1.0,
+                cp.as_mut_ptr(),
+                cr,
+                cc,
+            );
+        }
+
+        #[cfg(feature = "cblas")]
         unsafe {
             let (m, n, k) = (m as libc::c_int, n as libc::c_int, k as libc::c_int);
             let (layout, a_tr, b_tr, lda, ldb, ldc) = if cr < cc {
