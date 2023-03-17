@@ -361,6 +361,7 @@ impl<T: Tensor + BertOps<T>> BertEmbeddings<T> {
 }
 
 /// TODO
+#[derive(Clone)]
 pub struct Bert<T: Tensor + BertOps<T>> {
     embeddings: BertEmbeddings<T>,
     encoder: BertEncoder<T>,
@@ -403,6 +404,7 @@ impl<T: Tensor + BertOps<T>> BertPooler<T> {
 }
 
 /// TODO
+#[derive(Clone)]
 pub struct BertClassifier<T: Tensor + BertOps<T>> {
     bert: Bert<T>,
     pooler: BertPooler<T>,
