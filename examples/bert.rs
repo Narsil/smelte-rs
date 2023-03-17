@@ -45,7 +45,7 @@ impl Config {
 pub fn main() -> Result<(), BertError> {
     let start = std::time::Instant::now();
     let args: Vec<String> = std::env::args().collect();
-    let (n, string) = if args.len() > 0 {
+    let (n, string) = if args.len() > 1 {
         let mut string = "".to_string();
         let mut n = 1;
         let mut i = 1;

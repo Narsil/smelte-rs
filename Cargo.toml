@@ -25,6 +25,7 @@ default = ["cblas"]
 cblas = ["cblas-sys"]
 intel-mkl = ["cblas"]
 f16 = ["dep:half", "dep:num-traits"]
+matrixmultiply = ["matrixmultiply/threading"]
 
 
 [[example]]
