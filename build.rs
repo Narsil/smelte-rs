@@ -1,4 +1,5 @@
 //! This build script emits the openblas linking directive if requested
+#[cfg(not(feature = "matrixmultiply"))]
 #[derive(PartialEq, Eq)]
 enum Library {
     Static,
@@ -109,19 +110,21 @@ fn main() -> Result<(), BuildError> {
     println!("cargo:rerun-if-changed=build.rs");
 
     println!("cargo:rerun-if-env-changed=STATIC");
+    #[cfg(not(feature = "matrixmultiply"))]
     let library = if std::env::var("STATIC").unwrap_or_else(|_| "0".to_string()) == "1" {
         Library::Static
     } else {
         Library::Dynamic
     };
 
+    #[cfg(not(feature = "matrixmultiply"))]
     let link_type: &str = if Library::Static == library {
         "static"
     } else {
         "dylib"
     };
 
-    #[cfg(not(feature = "matrixmuliply"))]
+    #[cfg(not(feature = "matrixmultiply"))]
     println!("cargo:rustc-link-lib={link_type}=cblas");
 
     #[cfg(feature = "intel-mkl")]
