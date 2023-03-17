@@ -33,6 +33,10 @@ jobs:
           command: install
           args: cargo-readme
 
+      - name: Setup tmate session
+        if: matrix.os == 'windows-latest'
+        uses: mxschmitt/action-tmate@v3
+
       - name: Build
         uses: actions-rs/cargo@v1
         with:
