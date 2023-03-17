@@ -1,5 +1,5 @@
 #![deny(missing_docs)]
-//! # What is smelt ?
+//! # What is smelte-rs ?
 //!
 //! Smelt is a ML library focusing on inference, small depedencies with as many optimizations
 //! as possible, and still be readable and easy to use.
