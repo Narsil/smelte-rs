@@ -114,13 +114,14 @@ fn main() -> Result<(), BuildError> {
     } else {
         Library::Dynamic
     };
+
     let link_type: &str = if Library::Static == library {
         "static"
     } else {
         "dylib"
     };
 
-    #[cfg(not(feature = "intel-mkl"))]
+    #[cfg(not(feature = "matrixmuliply"))]
     println!("cargo:rustc-link-lib={link_type}=cblas");
 
     #[cfg(feature = "intel-mkl")]
