@@ -96,15 +96,21 @@
 /// The various CPU implementations
 pub mod cpu;
 
+/// The various GPU implementations
+#[cfg(feature = "gpu")]
+pub mod gpu;
+#[cfg(feature = "gpu")]
+use gpu::f32::CudaError;
+
 /// The neural networks
 pub mod nn;
 
 /// The traits for generic implementations
 pub mod traits;
 
-/// Error linked to the tensor creation
+/// Potential errors when using the library
 #[derive(Debug)]
-pub enum TensorError {
+pub enum SmeltError {
     /// The arguments to the tensor creation are invalid, the shape doesn't match
     /// the size of the buffer.
     InvalidBuffer {
@@ -113,11 +119,6 @@ pub enum TensorError {
         /// The shape of the tensor to create
         shape: Vec<usize>,
     },
-}
-
-/// Potential errors when using the library
-#[derive(Debug)]
-pub enum SmeltError {
     /// The operation could not succeed because the shapes are not valid.
     DimensionMismatch {
         /// The shape that we should have seen
@@ -156,6 +157,10 @@ pub enum SmeltError {
         /// The size we got
         got: usize,
     },
+
+    /// All errors of cuda handling
+    #[cfg(feature = "gpu")]
+    Cuda(CudaError),
 }
 
 #[cfg(test)]

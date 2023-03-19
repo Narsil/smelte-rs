@@ -9,7 +9,7 @@ use smelte_rs::nn::layers::{Embedding, LayerNorm, Linear};
 use smelte_rs::nn::models::bert::{
     Bert, BertAttention, BertClassifier, BertEmbeddings, BertEncoder, BertLayer, BertPooler, Mlp,
 };
-use smelte_rs::TensorError;
+use smelte_rs::SmeltError;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs::File;
@@ -157,7 +157,7 @@ pub trait FromSafetensors<'a> {
         Self: Sized;
 }
 
-fn to_tensor<'data>(view: TensorView<'data>) -> Result<Tensor<'data>, TensorError> {
+fn to_tensor<'data>(view: TensorView<'data>) -> Result<Tensor<'data>, SmeltError> {
     let shape = view.shape().to_vec();
     let data = to_f32(view);
     Tensor::new(data, shape)

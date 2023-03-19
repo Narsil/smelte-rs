@@ -1,4 +1,4 @@
-use crate::TensorError;
+use crate::SmeltError;
 use std::borrow::Cow;
 
 /// Tensor, can own, or borrow the underlying tensor
@@ -62,7 +62,7 @@ impl<'data> Tensor<'data> {
     /// let data = [1.0, 2.0, 3.0, 4.0];
     /// let tensor = Tensor::borrowed(&data, vec![2, 2]).unwrap();
     /// ```
-    pub fn borrowed(data: &'data [f32], shape: Vec<usize>) -> Result<Self, TensorError> {
+    pub fn borrowed(data: &'data [f32], shape: Vec<usize>) -> Result<Self, SmeltError> {
         let cow: Cow<'data, [f32]> = data.into();
         Self::new(cow, shape)
     }
@@ -74,13 +74,13 @@ impl<'data> Tensor<'data> {
     /// let data = vec![1.0, 2.0, 3.0, 4.0];
     /// let tensor = Tensor::new(data, vec![2, 2]).unwrap();
     /// ```
-    pub fn new<T>(data: T, shape: Vec<usize>) -> Result<Self, TensorError>
+    pub fn new<T>(data: T, shape: Vec<usize>) -> Result<Self, SmeltError>
     where
         T: Into<Cow<'data, [f32]>>,
     {
         let data = data.into();
         if data.len() != shape.iter().product::<usize>() {
-            return Err(TensorError::InvalidBuffer {
+            return Err(SmeltError::InvalidBuffer {
                 buffer_size: data.len(),
                 shape,
             });
