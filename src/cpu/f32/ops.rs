@@ -389,6 +389,17 @@ mod tests {
     use crate::tests::simplify;
 
     #[test]
+    fn simple_broadcast_add() {
+        let a = Tensor::new(vec![1.0, 2.0], vec![2]).unwrap();
+        let mut b = Tensor::new(vec![1.0, 1.0, 1.0, 1.0, 1.0, 1.0], vec![3, 2]).unwrap();
+        broadcast_add(&a, &mut b).unwrap();
+        assert_eq!(
+            b.data(),
+            [2.0, 3.0, 2.0, 3.0, 2.0, 3.0]
+        );
+    }
+
+    #[test]
     fn simple_matmul() {
         let data = vec![1.0, 2.0, 3.0, 4.0];
         let a = Tensor::new(data, vec![2, 2]).unwrap();

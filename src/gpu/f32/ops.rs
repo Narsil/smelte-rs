@@ -5,6 +5,9 @@ use cudarc::cublas::safe::{CudaBlas, GemmConfig, StridedBatchedConfig};
 use cudarc::cublas::sys::cublasOperation_t::{CUBLAS_OP_N as NoTr, CUBLAS_OP_T as Tr};
 use cudarc::cublas::Gemm;
 use cudarc::driver::DriverError;
+use cudarc::driver::LaunchConfig;
+use cudarc::driver::DeviceSlice;
+use cudarc::driver::LaunchAsync;
 
 /// All potential errors linked specifically to cuda.
 #[derive(Debug, Clone)]
@@ -192,59 +195,145 @@ fn g_matmul<'a, const TRANSPOSE: bool>(
 
     Ok(())
 }
-//
-// /// tensor elementwise addition. b += a.
-// /// a is automatically broadcasted.
-// pub fn add(a: &Tensor, b: &mut Tensor) -> Result<(), SmeltError> {
-//     if a.shape() == b.shape() {
-//         a.data()
-//             .iter()
-//             .zip(b.data_mut().iter_mut())
-//             .for_each(|(left, right)| *right += left);
-//         Ok(())
-//     } else if &b.shape()[1..] == a.shape() {
-//         let n = b.shape()[0];
-//         (0..n).for_each(|i| {
-//             a.data()
-//                 .iter()
-//                 .zip(b.data_mut().iter_mut().skip(i * a.shape()[0]))
-//                 .for_each(|(left, right)| *right += left);
-//         });
-//         Ok(())
-//     } else {
-//         Err(SmeltError::DimensionMismatch {
-//             expected: b.shape().to_vec(),
-//             got: a.shape().to_vec(),
-//         })
-//     }
-// }
-//
-// /// tensor elementwise multiplication. b *= a.
-// /// a is automatically broadcasted.
-// pub fn mul(a: &Tensor, b: &mut Tensor) -> Result<(), SmeltError> {
-//     if a.shape() == b.shape() {
-//         a.data()
-//             .iter()
-//             .zip(b.data_mut().iter_mut())
-//             .for_each(|(left, right)| *right *= left);
-//         Ok(())
-//     } else if &b.shape()[1..] == a.shape() {
-//         let n = b.shape()[0];
-//         (0..n).for_each(|i| {
-//             a.data()
-//                 .iter()
-//                 .zip(b.data_mut().iter_mut().skip(i * a.shape()[0]))
-//                 .for_each(|(left, right)| *right *= left);
-//         });
-//         Ok(())
-//     } else {
-//         Err(SmeltError::DimensionMismatch {
-//             expected: b.shape().to_vec(),
-//             got: a.shape().to_vec(),
-//         })
-//     }
-// }
-//
+
+const ADD_PTX: &str = include_str!(concat!(env!("OUT_DIR"), "/add.ptx"));
+/// tensor elementwise addition. b += a.
+pub fn add(a: &Tensor, b: &mut Tensor) -> Result<(), SmeltError> {
+    if a.shape() != b.shape() {
+        return Err(SmeltError::DimensionMismatch {
+            expected: b.shape().to_vec(),
+            got: a.shape().to_vec(),
+        });
+    }
+    if a.device_id() != b.device_id() {
+        return Err(SmeltError::Cuda(CudaError::TensorOnDifferentDevice {
+            got: b.device_id(),
+            expected: a.device_id(),
+        }));
+    }
+
+    let dev = a.device();
+
+    let module_name = "add_fwd_f32";
+     if !dev.has_func(module_name, module_name) {
+        dev
+            .load_ptx(ADD_PTX.into(), module_name, &[module_name])?;
+    }
+
+    let numel = a.data().len();
+
+    let fwd_fn = dev.get_func(module_name, module_name).unwrap();
+    let cfg = LaunchConfig::for_num_elems(numel as u32);
+    let params = (numel, a.data(), b.data_mut());
+    unsafe { fwd_fn.launch(cfg, params) }?;
+
+    Ok(())
+}
+
+/// broacasted tensor elementwise addition. b += a.
+pub fn broadcast_add(a: &Tensor, b: &mut Tensor) -> Result<(), SmeltError> {
+    if &b.shape()[1..] != a.shape() {
+        return Err(SmeltError::DimensionMismatch {
+            expected: b.shape().to_vec(),
+            got: a.shape().to_vec(),
+        });
+    }
+    let skip: usize = a.shape().iter().product();
+    if a.device_id() != b.device_id() {
+        return Err(SmeltError::Cuda(CudaError::TensorOnDifferentDevice {
+            got: b.device_id(),
+            expected: a.device_id(),
+        }));
+    }
+
+    let dev = a.device();
+
+    let module_name = "badd_fwd_f32";
+     if !dev.has_func(module_name, module_name) {
+        dev
+            .load_ptx(ADD_PTX.into(), module_name, &[module_name])?;
+    }
+
+    let numel = b.data().len();
+
+    let fwd_fn = dev.get_func(module_name, module_name).unwrap();
+    let cfg = LaunchConfig::for_num_elems(numel as u32);
+    let params = (numel, a.data(), b.data_mut(), skip);
+    unsafe { fwd_fn.launch(cfg, params) }?;
+
+    Ok(())
+}
+
+/// tensor elementwise multiplication. b *= a.
+pub fn mul(a: &Tensor, b: &mut Tensor) -> Result<(), SmeltError> {
+    if a.shape() != b.shape() {
+        return Err(SmeltError::DimensionMismatch {
+            expected: b.shape().to_vec(),
+            got: a.shape().to_vec(),
+        });
+    }
+    if a.device_id() != b.device_id() {
+        return Err(SmeltError::Cuda(CudaError::TensorOnDifferentDevice {
+            got: b.device_id(),
+            expected: a.device_id(),
+        }));
+    }
+
+    let dev = a.device();
+
+    let module_name = "mul_fwd_f32";
+     if !dev.has_func(module_name, module_name) {
+        dev
+            .load_ptx(ADD_PTX.into(), module_name, &[module_name])?;
+    }
+
+    let numel = a.data().len();
+
+    let fwd_fn = dev.get_func(module_name, module_name).unwrap();
+    let cfg = LaunchConfig::for_num_elems(numel as u32);
+    let params = (numel, a.data(), b.data_mut());
+    unsafe { fwd_fn.launch(cfg, params) }?;
+
+    Ok(())
+}
+
+
+ 
+/// broadcasted tensor elementwise multiplication. b *= a.
+pub fn broadcast_mul(a: &Tensor, b: &mut Tensor) -> Result<(), SmeltError> {
+    if &b.shape()[1..] != a.shape() {
+        return Err(SmeltError::DimensionMismatch {
+            expected: b.shape().to_vec(),
+            got: a.shape().to_vec(),
+        });
+    }
+    let skip: usize = a.shape().iter().product();
+    if a.device_id() != b.device_id() {
+        return Err(SmeltError::Cuda(CudaError::TensorOnDifferentDevice {
+            got: b.device_id(),
+            expected: a.device_id(),
+        }));
+    }
+
+    let dev = a.device();
+
+    let module_name = "bmul_fwd_f32";
+     if !dev.has_func(module_name, module_name) {
+        dev
+            .load_ptx(ADD_PTX.into(), module_name, &[module_name])?;
+    }
+
+    let numel = b.data().len();
+
+    let fwd_fn = dev.get_func(module_name, module_name).unwrap();
+    let cfg = LaunchConfig::for_num_elems(numel as u32);
+    let params = (numel, a.data(), b.data_mut(), skip);
+    unsafe { fwd_fn.launch(cfg, params) }?;
+
+    Ok(())
+}
+
+
 // /// Basic operation for the layernorm.
 // /// x = (x - x.mean()) / (x.var() + epsilon)
 // /// `mean` and `var` do not have to be initialized, they are simply passed to
@@ -469,6 +558,43 @@ mod tests {
             ]
         );
     }
+    
+    #[test]
+    fn simple_add() {
+        let a = Tensor::from_cpu(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], 0).unwrap();
+        let mut b = Tensor::from_cpu(vec![1.0, 1.0, 1.0, 1.0], vec![2, 2], 0).unwrap();
+        add(&a, &mut b).unwrap();
+        assert_eq!(
+            b.cpu_data().unwrap(),
+            // Values obtained through python
+            [2.0, 3.0, 4.0, 5.0]
+        );
+    }
+
+    #[test]
+    fn simple_broadcast_add() {
+        let a = Tensor::from_cpu(vec![1.0, 2.0], vec![2], 0).unwrap();
+        let mut b = Tensor::from_cpu(vec![1.0, 1.0, 1.0, 1.0, 1.0, 1.0], vec![3, 2], 0).unwrap();
+        broadcast_add(&a, &mut b).unwrap();
+        assert_eq!(
+            b.cpu_data().unwrap(),
+            // Values obtained through python
+            [2.0, 3.0, 2.0, 3.0, 2.0, 3.0]
+        );
+    }
+
+    #[test]
+    fn simple_mul() {
+        let a = Tensor::from_cpu(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], 0).unwrap();
+        let mut b = Tensor::from_cpu(vec![2.0, 2.0, 3.0, 3.0], vec![2, 2], 0).unwrap();
+        mul(&a, &mut b).unwrap();
+        assert_eq!(
+            b.cpu_data().unwrap(),
+            // Values obtained through python
+            [2.0, 4.0, 9.0, 12.0]
+        );
+    }
+
     //
     //     #[test]
     //     fn simple_softmax() {
