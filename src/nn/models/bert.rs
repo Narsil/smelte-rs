@@ -138,6 +138,64 @@ where
 #[cfg(feature = "gpu")]
 mod cuda { 
      use super::*;
+      use cudarc::driver::{DeviceSlice, LaunchAsync, LaunchConfig};
+      use crate::gpu::f32::CudaError;
+
+    const RESHAPE_PTX: &str = include_str!(concat!(env!("OUT_DIR"), "/bert_reshape.ptx"));
+
+    fn cuda_split_heads(src: &F32CudaTensor, dst: &mut F32CudaTensor) -> Result<(), SmeltError>{
+        let dev = src.device();
+        if src.device_id() != dst.device_id() {
+            return Err(SmeltError::Cuda(CudaError::TensorOnDifferentDevice {
+                got: src.device_id(),
+                expected: dst.device_id(),
+            }));
+        }
+        let module_name = "split_heads";
+         if !dev.has_func(module_name, module_name) {
+            dev
+                .load_ptx(RESHAPE_PTX.into(), module_name, &[module_name])?;
+        }
+
+        let numel = dst.data().len();
+        let num_heads = dst.shape()[0];
+        let sequence_length = dst.shape()[1];
+        let head_dim = dst.shape()[2];
+
+        let fwd_fn = dev.get_func(module_name, module_name).unwrap();
+        let cfg = LaunchConfig::for_num_elems(numel as u32);
+        let params = (numel, src.data(), dst.data_mut(), num_heads, sequence_length, head_dim);
+        unsafe { fwd_fn.launch(cfg, params) }?;
+
+        Ok(())
+    }
+
+    fn cuda_unsplit_heads(src: &F32CudaTensor, dst: &mut F32CudaTensor) -> Result<(), SmeltError>{
+        let dev = src.device();
+        if src.device_id() != dst.device_id() {
+            return Err(SmeltError::Cuda(CudaError::TensorOnDifferentDevice {
+                got: src.device_id(),
+                expected: dst.device_id(),
+            }));
+        }
+        let module_name = "unsplit_heads";
+         if !dev.has_func(module_name, module_name) {
+            dev
+                .load_ptx(RESHAPE_PTX.into(), module_name, &[module_name])?;
+        }
+
+        let numel = src.data().len();
+        let num_heads = src.shape()[0];
+        let sequence_length = src.shape()[1];
+        let head_dim = src.shape()[2];
+
+        let fwd_fn = dev.get_func(module_name, module_name).unwrap();
+        let cfg = LaunchConfig::for_num_elems(numel as u32);
+        let params = (numel, src.data(), dst.data_mut(), num_heads, sequence_length, head_dim);
+        unsafe { fwd_fn.launch(cfg, params) }?;
+
+        Ok(())
+    }
 fn cuda_attention(
     q_weights: &Linear<F32CudaTensor>,
     k_weights: &Linear<F32CudaTensor>,
@@ -146,47 +204,32 @@ fn cuda_attention(
 ) -> Result<(), SmeltError>
 {
     q_weights.forward(&ctx.hidden_states, &mut ctx.hidden_states_copy)?;
-    todo!("permute heads");
-    // split_heads(&ctx.hidden_states_copy, &mut ctx.q_cache)?;
+    cuda_split_heads(&ctx.hidden_states_copy, &mut ctx.q_cache)?;
 
     debug!("Q head splitted", ctx.q_cache);
 
     k_weights.forward(&ctx.hidden_states, &mut ctx.hidden_states_copy)?;
-    // split_heads(&ctx.hidden_states_copy, &mut ctx.k_cache)?;
+    cuda_split_heads(&ctx.hidden_states_copy, &mut ctx.k_cache)?;
 
     debug!("K head splitted", ctx.k_cache);
 
     v_weights.forward(&ctx.hidden_states, &mut ctx.hidden_states_copy)?;
-    // split_heads(&ctx.hidden_states_copy, &mut ctx.v_cache)?;
+    cuda_split_heads(&ctx.hidden_states_copy, &mut ctx.v_cache)?;
 
     debug!("V head splitted", ctx.v_cache);
 
-    cuda_f32::matmul_t(&ctx.q_cache, &ctx.k_cache, &mut ctx.qk).unwrap();
+    cuda_f32::matmul_t(&ctx.q_cache, &ctx.k_cache, &mut ctx.qk)?;
 
-    let num_heads = ctx.q_cache.shape()[0];
-    let sequence_length = ctx.q_cache.shape()[1];
     let head_dim = ctx.q_cache.shape()[2];
-    let hidden_dim = head_dim * num_heads;
     let scale = (head_dim as f32).sqrt();
-    cuda_f32::mul_scalar(&mut ctx.qk, 1.0 / scale);
+    cuda_f32::mul_scalar(&mut ctx.qk, 1.0 / scale)?;
 
-    cuda_f32::softmax(&mut ctx.qk).unwrap();
+    cuda_f32::softmax(&mut ctx.qk)?;
     debug!("attention_probs", ctx.qk);
-    cuda_f32::matmul(&ctx.qk, &ctx.v_cache, &mut ctx.qkv).unwrap();
+    cuda_f32::matmul(&ctx.qk, &ctx.v_cache, &mut ctx.qkv)?;
     debug!("qkv", ctx.qkv);
 
-    todo!("repermute");
-    // let new_out = &mut ctx.hidden_states_attn_output.data_mut();
-    // (0..num_heads).for_each(|i| {
-    //     (0..sequence_length).for_each(|j| {
-    //         (0..head_dim).for_each(|k| {
-    //             let in_index = i * sequence_length * head_dim + j * head_dim + k;
-    //             let out_index = j * hidden_dim + i * head_dim + k;
-    //             new_out[out_index] = (ctx.qkv).data()[in_index];
-    //         });
-    //     });
-    // });
-    // debug!("qkv (reshaed)", ctx.hidden_states_attn_output);
+    cuda_unsplit_heads(&ctx.qkv, &mut ctx.hidden_states_attn_output)?;
 
     Ok(())
 }

@@ -108,9 +108,6 @@ fn g_matmul<'a, const TRANSPOSE: bool>(
     if dim < 2 {
         return Err(SmeltError::InsufficientRank { minimum_rank: 2 });
     }
-    println!("a {:?}", a.shape());
-    println!("b {:?}", b.shape());
-    println!("c {:?}", c.shape());
     if b.shape().len() != dim {
         return Err(SmeltError::InvalidRank { expected_rank: dim });
     }
