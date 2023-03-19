@@ -1,6 +1,11 @@
 use crate::cpu::f32::{matmul, matmul_t, softmax, Tensor as F32Tensor};
+
+#[cfg(feature = "gpu")]
 use crate::gpu::f32 as cuda_f32;
+
+#[cfg(feature = "gpu")]
 use crate::gpu::f32::Tensor as F32CudaTensor;
+
 use crate::nn::layers::{Embedding, LayerNorm, Linear};
 use crate::traits::{Tensor, TensorOps};
 use crate::SmeltError;
@@ -130,6 +135,9 @@ where
     Ok(())
 }
 
+#[cfg(feature = "gpu")]
+mod cuda { 
+     use super::*;
 fn cuda_attention(
     q_weights: &Linear<F32CudaTensor>,
     k_weights: &Linear<F32CudaTensor>,
@@ -182,6 +190,21 @@ fn cuda_attention(
 
     Ok(())
 }
+impl TensorAttention<F32CudaTensor> for F32CudaTensor {
+    fn attention(
+        query: &Linear<F32CudaTensor>,
+        key: &Linear<F32CudaTensor>,
+        value: &Linear<F32CudaTensor>,
+        ctx: &mut BertContext<F32CudaTensor>,
+    ) -> Result<(), SmeltError> {
+        cuda_attention(query, key, value, ctx)?;
+        Ok(())
+    }
+}
+
+impl BertOps<F32CudaTensor> for F32CudaTensor {}
+
+}
 
 /// TODO
 pub trait TensorAttention<T: Tensor> {
@@ -205,29 +228,11 @@ impl<'a> TensorAttention<F32Tensor<'a>> for F32Tensor<'a> {
         Ok(())
     }
 }
-impl TensorAttention<F32CudaTensor> for F32CudaTensor {
-    fn attention(
-        query: &Linear<F32CudaTensor>,
-        key: &Linear<F32CudaTensor>,
-        value: &Linear<F32CudaTensor>,
-        ctx: &mut BertContext<F32CudaTensor>,
-    ) -> Result<(), SmeltError> {
-        cuda_attention(query, key, value, ctx)?;
-        Ok(())
-    }
-}
-
-/// TODO
-pub trait Reshape<T: Tensor> {
-    /// TODO
-    fn data(&self) -> &[f32];
-}
 
 /// TODO
 pub trait BertOps<T: Tensor>: TensorOps<T> + TensorAttention<T> {}
 
 impl<'a> BertOps<F32Tensor<'a>> for F32Tensor<'a> {}
-impl BertOps<F32CudaTensor> for F32CudaTensor {}
 
 /// TODO
 #[derive(Clone)]

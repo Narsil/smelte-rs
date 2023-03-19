@@ -1,3 +1,5 @@
+#[cfg(feature = "gpu")]
+mod gpu{
 use memmap2::MmapOptions;
 use safetensors::{
     tensor::{Dtype, SafeTensorError, TensorView},
@@ -42,108 +44,6 @@ impl Config {
     }
 }
 
-pub fn main() -> Result<(), BertError> {
-    let start = std::time::Instant::now();
-    let args: Vec<String> = std::env::args().collect();
-    let (n, string) = if args.len() > 1 {
-        let mut string = "".to_string();
-        let mut n = 1;
-        let mut i = 1;
-        while i < args.len() {
-            if args[i] == "-n" {
-                i += 1;
-                n = args[i].parse().unwrap();
-            } else if args[i] == "-h" {
-                println!(
-                    "Use `-n 3` to run the prompt n times, the rest is interpreted as the prompt."
-                );
-                return Ok(());
-            } else {
-                string.push_str(&args[i]);
-                i += 1;
-            }
-        }
-        (n, string)
-    } else {
-        (
-            1,
-            "Stocks rallied and the British pound gained.".to_string(),
-        )
-    };
-
-    let model_id = "Narsil/finbert";
-
-    let model_id_slug = model_id.replace('/', "-");
-
-    let filename = format!("model-{model_id_slug}.safetensors");
-    if !std::path::Path::new(&filename).exists() {
-        println!(
-            r#"Model not found, try downloading it with \n
-        `curl https://huggingface.co/{model_id}/resolve/main/model.safetensors -o model-{model_id_slug}.safetensors -L`
-        `curl https://huggingface.co/{model_id}/resolve/main/tokenizer.json -o tokenizer-{model_id_slug}.json -L`
-        `curl https://huggingface.co/{model_id}/resolve/main/config.json -o config-{model_id_slug}.json -L`
-        "#
-        );
-    }
-
-    let file = File::open(filename)?;
-    let buffer = unsafe { MmapOptions::new().map(&file)? };
-    let tensors = SafeTensors::deserialize(&buffer)?;
-    println!("Safetensors {:?}", start.elapsed());
-
-    let filename = format!("tokenizer-{model_id_slug}.json");
-    if !std::path::Path::new(&filename).exists() {
-        println!(
-            r#"Tokenizer not found, try downloading it with \n
-        `curl https://huggingface.co/{model_id}/resolve/main/tokenizer.json -o tokenizer-{model_id_slug}.json -L`
-        "#
-        );
-    }
-    let tokenizer = Tokenizer::from_file(filename).unwrap();
-    println!("Tokenizer {:?}", start.elapsed());
-
-    let filename = format!("config-{model_id_slug}.json");
-    if !std::path::Path::new(&filename).exists() {
-        println!(
-            r#"Config not found, try downloading it with \n
-        `curl https://huggingface.co//resolve/main/config.json -o config-{model_id_slug}.json -L`
-        "#
-        );
-    }
-    let config_str: String = std::fs::read_to_string(filename).expect("Could not read config");
-    let config: Config = serde_json::from_str(&config_str).expect("Could not parse Config");
-
-    let mut bert = BertClassifier::from_tensors(&tensors);
-    bert.set_num_heads(config.num_attention_heads);
-    println!("Loaded {:?}", start.elapsed());
-
-    let encoded = tokenizer.encode(string.clone(), false).unwrap();
-    let encoded = tokenizer.post_process(encoded, None, true).unwrap();
-
-    println!("Loaded & encoded {:?}", start.elapsed());
-
-    for _ in 0..n {
-        println!("Running bert inference on `{string:?}`");
-        let inference_start = std::time::Instant::now();
-        let input_ids: Vec<_> = encoded.get_ids().iter().map(|i| *i as usize).collect();
-        let position_ids: Vec<_> = (0..input_ids.len()).collect();
-        let type_ids: Vec<_> = encoded.get_type_ids().iter().map(|i| *i as usize).collect();
-        let probs = bert.run(input_ids, position_ids, type_ids).unwrap();
-
-        let id2label = config.id2label();
-        let mut outputs: Vec<_> = probs
-            .cpu_data().unwrap()
-            .iter()
-            .enumerate()
-            .map(|(i, &p)| (get_label(id2label, i).unwrap_or(format!("LABEL_{}", i)), p))
-            .collect();
-        outputs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-        println!("Probs {:?}", outputs);
-        println!("Inference in {:?}", inference_start.elapsed());
-    }
-    println!("Total Inference {:?}", start.elapsed());
-    Ok(())
-}
 
 pub fn get_label(id2label: Option<&HashMap<String, String>>, i: usize) -> Option<String> {
     let id2label: &HashMap<String, String> = id2label?;
@@ -355,4 +255,115 @@ impl<'a> FromSafetensors<'a> for BertEncoder<Tensor> {
             .collect();
         Self::new(layers)
     }
+}
+
+pub fn run() -> Result<(), BertError> {
+    let start = std::time::Instant::now();
+    let args: Vec<String> = std::env::args().collect();
+    let (n, string) = if args.len() > 1 {
+        let mut string = "".to_string();
+        let mut n = 1;
+        let mut i = 1;
+        while i < args.len() {
+            if args[i] == "-n" {
+                i += 1;
+                n = args[i].parse().unwrap();
+            } else if args[i] == "-h" {
+                println!(
+                    "Use `-n 3` to run the prompt n times, the rest is interpreted as the prompt."
+                );
+                return Ok(());
+            } else {
+                string.push_str(&args[i]);
+                i += 1;
+            }
+        }
+        (n, string)
+    } else {
+        (
+            1,
+            "Stocks rallied and the British pound gained.".to_string(),
+        )
+    };
+
+    let model_id = "Narsil/finbert";
+
+    let model_id_slug = model_id.replace('/', "-");
+
+    let filename = format!("model-{model_id_slug}.safetensors");
+    if !std::path::Path::new(&filename).exists() {
+        println!(
+            r#"Model not found, try downloading it with \n
+        `curl https://huggingface.co/{model_id}/resolve/main/model.safetensors -o model-{model_id_slug}.safetensors -L`
+        `curl https://huggingface.co/{model_id}/resolve/main/tokenizer.json -o tokenizer-{model_id_slug}.json -L`
+        `curl https://huggingface.co/{model_id}/resolve/main/config.json -o config-{model_id_slug}.json -L`
+        "#
+        );
+    }
+
+    let file = File::open(filename)?;
+    let buffer = unsafe { MmapOptions::new().map(&file)? };
+    let tensors = SafeTensors::deserialize(&buffer)?;
+    println!("Safetensors {:?}", start.elapsed());
+
+    let filename = format!("tokenizer-{model_id_slug}.json");
+    if !std::path::Path::new(&filename).exists() {
+        println!(
+            r#"Tokenizer not found, try downloading it with \n
+        `curl https://huggingface.co/{model_id}/resolve/main/tokenizer.json -o tokenizer-{model_id_slug}.json -L`
+        "#
+        );
+    }
+    let tokenizer = Tokenizer::from_file(filename).unwrap();
+    println!("Tokenizer {:?}", start.elapsed());
+
+    let filename = format!("config-{model_id_slug}.json");
+    if !std::path::Path::new(&filename).exists() {
+        println!(
+            r#"Config not found, try downloading it with \n
+        `curl https://huggingface.co//resolve/main/config.json -o config-{model_id_slug}.json -L`
+        "#
+        );
+    }
+    let config_str: String = std::fs::read_to_string(filename).expect("Could not read config");
+    let config: Config = serde_json::from_str(&config_str).expect("Could not parse Config");
+
+    let mut bert = BertClassifier::from_tensors(&tensors);
+    bert.set_num_heads(config.num_attention_heads);
+    println!("Loaded {:?}", start.elapsed());
+
+    let encoded = tokenizer.encode(string.clone(), false).unwrap();
+    let encoded = tokenizer.post_process(encoded, None, true).unwrap();
+
+    println!("Loaded & encoded {:?}", start.elapsed());
+
+    for _ in 0..n {
+        println!("Running bert inference on `{string:?}`");
+        let inference_start = std::time::Instant::now();
+        let input_ids: Vec<_> = encoded.get_ids().iter().map(|i| *i as usize).collect();
+        let position_ids: Vec<_> = (0..input_ids.len()).collect();
+        let type_ids: Vec<_> = encoded.get_type_ids().iter().map(|i| *i as usize).collect();
+        let probs = bert.run(input_ids, position_ids, type_ids).unwrap();
+
+        let id2label = config.id2label();
+        let mut outputs: Vec<_> = probs
+            .cpu_data().unwrap()
+            .iter()
+            .enumerate()
+            .map(|(i, &p)| (get_label(id2label, i).unwrap_or(format!("LABEL_{}", i)), p))
+            .collect();
+        outputs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        println!("Probs {:?}", outputs);
+        println!("Inference in {:?}", inference_start.elapsed());
+    }
+    println!("Total Inference {:?}", start.elapsed());
+    Ok(())
+}
+}
+
+fn main() {
+    #[cfg(not(feature = "gpu"))]
+    unreachable!("Requires gpu feature");
+    #[cfg(feature = "gpu")]
+    gpu::run().unwrap()
 }
