@@ -50,3 +50,7 @@ gpu = ["dep:cudarc", "dep:glob"]
 
 [[example]]
 name = "bert"
+
+[[example]]
+name = "bert_gpu"
+required_features = ["gpu"]

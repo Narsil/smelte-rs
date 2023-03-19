@@ -1,4 +1,11 @@
 use crate::cpu::f32::{matmul, matmul_t, softmax, Tensor as F32Tensor};
+
+#[cfg(feature = "gpu")]
+use crate::gpu::f32 as cuda_f32;
+
+#[cfg(feature = "gpu")]
+use crate::gpu::f32::Tensor as F32CudaTensor;
+
 use crate::nn::layers::{Embedding, LayerNorm, Linear};
 use crate::traits::{Tensor, TensorOps};
 use crate::SmeltError;
@@ -128,6 +135,120 @@ where
     Ok(())
 }
 
+#[cfg(feature = "gpu")]
+mod cuda { 
+     use super::*;
+      use cudarc::driver::{DeviceSlice, LaunchAsync, LaunchConfig};
+      use crate::gpu::f32::CudaError;
+
+    const RESHAPE_PTX: &str = include_str!(concat!(env!("OUT_DIR"), "/bert_reshape.ptx"));
+
+    fn cuda_split_heads(src: &F32CudaTensor, dst: &mut F32CudaTensor) -> Result<(), SmeltError>{
+        let dev = src.device();
+        if src.device_id() != dst.device_id() {
+            return Err(SmeltError::Cuda(CudaError::TensorOnDifferentDevice {
+                got: src.device_id(),
+                expected: dst.device_id(),
+            }));
+        }
+        let module_name = "split_heads";
+         if !dev.has_func(module_name, module_name) {
+            dev
+                .load_ptx(RESHAPE_PTX.into(), module_name, &[module_name])?;
+        }
+
+        let numel = dst.data().len();
+        let num_heads = dst.shape()[0];
+        let sequence_length = dst.shape()[1];
+        let head_dim = dst.shape()[2];
+
+        let fwd_fn = dev.get_func(module_name, module_name).unwrap();
+        let cfg = LaunchConfig::for_num_elems(numel as u32);
+        let params = (numel, src.data(), dst.data_mut(), num_heads, sequence_length, head_dim);
+        unsafe { fwd_fn.launch(cfg, params) }?;
+
+        Ok(())
+    }
+
+    fn cuda_unsplit_heads(src: &F32CudaTensor, dst: &mut F32CudaTensor) -> Result<(), SmeltError>{
+        let dev = src.device();
+        if src.device_id() != dst.device_id() {
+            return Err(SmeltError::Cuda(CudaError::TensorOnDifferentDevice {
+                got: src.device_id(),
+                expected: dst.device_id(),
+            }));
+        }
+        let module_name = "unsplit_heads";
+         if !dev.has_func(module_name, module_name) {
+            dev
+                .load_ptx(RESHAPE_PTX.into(), module_name, &[module_name])?;
+        }
+
+        let numel = src.data().len();
+        let num_heads = src.shape()[0];
+        let sequence_length = src.shape()[1];
+        let head_dim = src.shape()[2];
+
+        let fwd_fn = dev.get_func(module_name, module_name).unwrap();
+        let cfg = LaunchConfig::for_num_elems(numel as u32);
+        let params = (numel, src.data(), dst.data_mut(), num_heads, sequence_length, head_dim);
+        unsafe { fwd_fn.launch(cfg, params) }?;
+
+        Ok(())
+    }
+fn cuda_attention(
+    q_weights: &Linear<F32CudaTensor>,
+    k_weights: &Linear<F32CudaTensor>,
+    v_weights: &Linear<F32CudaTensor>,
+    ctx: &mut BertContext<F32CudaTensor>,
+) -> Result<(), SmeltError>
+{
+    q_weights.forward(&ctx.hidden_states, &mut ctx.hidden_states_copy)?;
+    cuda_split_heads(&ctx.hidden_states_copy, &mut ctx.q_cache)?;
+
+    debug!("Q head splitted", ctx.q_cache);
+
+    k_weights.forward(&ctx.hidden_states, &mut ctx.hidden_states_copy)?;
+    cuda_split_heads(&ctx.hidden_states_copy, &mut ctx.k_cache)?;
+
+    debug!("K head splitted", ctx.k_cache);
+
+    v_weights.forward(&ctx.hidden_states, &mut ctx.hidden_states_copy)?;
+    cuda_split_heads(&ctx.hidden_states_copy, &mut ctx.v_cache)?;
+
+    debug!("V head splitted", ctx.v_cache);
+
+    cuda_f32::matmul_t(&ctx.q_cache, &ctx.k_cache, &mut ctx.qk)?;
+
+    let head_dim = ctx.q_cache.shape()[2];
+    let scale = (head_dim as f32).sqrt();
+    cuda_f32::mul_scalar(&mut ctx.qk, 1.0 / scale)?;
+
+    cuda_f32::softmax(&mut ctx.qk)?;
+    debug!("attention_probs", ctx.qk);
+    cuda_f32::matmul(&ctx.qk, &ctx.v_cache, &mut ctx.qkv)?;
+    debug!("qkv", ctx.qkv);
+
+    cuda_unsplit_heads(&ctx.qkv, &mut ctx.hidden_states_attn_output)?;
+
+    Ok(())
+}
+impl TensorAttention<F32CudaTensor> for F32CudaTensor {
+    fn attention(
+        query: &Linear<F32CudaTensor>,
+        key: &Linear<F32CudaTensor>,
+        value: &Linear<F32CudaTensor>,
+        ctx: &mut BertContext<F32CudaTensor>,
+    ) -> Result<(), SmeltError> {
+        cuda_attention(query, key, value, ctx)?;
+        Ok(())
+    }
+}
+
+impl BertOps<F32CudaTensor> for F32CudaTensor {}
+
+}
+
 /// TODO
 pub trait TensorAttention<T: Tensor> {
     /// TODO
@@ -152,19 +273,7 @@ impl<'a> TensorAttention<F32Tensor<'a>> for F32Tensor<'a> {
 }
 
 /// TODO
-pub trait Debug<T: Tensor> {
-    /// TODO
-    fn data(&self) -> &[f32];
-}
-
-impl<'a> Debug<F32Tensor<'a>> for F32Tensor<'a> {
-    fn data(&self) -> &[f32] {
-        self.data()
-    }
-}
-
-/// TODO
-pub trait BertOps<T: Tensor>: TensorOps<T> + TensorAttention<T> + Debug<T> {}
+pub trait BertOps<T: Tensor>: TensorOps<T> + TensorAttention<T> {}
 
 impl<'a> BertOps<F32Tensor<'a>> for F32Tensor<'a> {}
 

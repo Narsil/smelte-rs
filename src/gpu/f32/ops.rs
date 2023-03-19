@@ -36,34 +36,44 @@ impl From<DriverError> for SmeltError {
         Self::Cuda(CudaError::DriverError(cublas))
     }
 }
-// use crate::gpu::f32::tensor::Tensor;
-// use crate::SmeltError;
-//
-// /// Operation for selecting entire rows within tensor `weights`. Each `id` is the index
-// /// of the row.
-// pub fn select(ids: &[usize], weights: &Tensor, out: &mut Tensor) -> Result<(), SmeltError> {
-//     let sequence_length = ids.len();
-//     let vocab_size = weights.shape()[0];
-//     let hidden_dim = weights.shape()[1];
-//     if out.shape() != [sequence_length, hidden_dim] {
-//         return Err(SmeltError::DimensionMismatch {
-//             expected: vec![sequence_length, hidden_dim],
-//             got: out.shape().to_vec(),
-//         });
-//     }
-//     for (i, id) in ids.iter().enumerate() {
-//         let id = *id;
-//         if id >= vocab_size {
-//             return Err(SmeltError::OutOfVocabulary { vocab_size, id });
-//         }
-//         let weight_offset = id * hidden_dim;
-//         let data_offset = i * hidden_dim;
-//         out.data_mut()[data_offset..data_offset + hidden_dim]
-//             .copy_from_slice(&weights.data()[weight_offset..weight_offset + hidden_dim]);
-//     }
-//     Ok(())
-// }
-//
+
+/// Operation for selecting entire rows within tensor `weights`. Each `id` is the index
+/// of the row.
+pub fn select(ids: &[usize], weights: &Tensor, out: &mut Tensor) -> Result<(), SmeltError> {
+    let sequence_length = ids.len();
+    let vocab_size = weights.shape()[0];
+    let hidden_dim = weights.shape()[1];
+    if out.shape() != [sequence_length, hidden_dim] {
+        return Err(SmeltError::DimensionMismatch {
+            expected: vec![sequence_length, hidden_dim],
+            got: out.shape().to_vec(),
+        });
+    }
+    if weights.device_id() != out.device_id() {
+        return Err(SmeltError::Cuda(CudaError::TensorOnDifferentDevice {
+            got: out.device_id(),
+            expected: weights.device_id(),
+        }));
+    }
+
+    let dev = weights.device();
+
+    for (i, id) in ids.iter().enumerate() {
+        let id = *id;
+        if id >= vocab_size {
+            return Err(SmeltError::OutOfVocabulary { vocab_size, id });
+        }
+        let weight_offset = id * hidden_dim;
+        let data_offset = i * hidden_dim;
+
+
+        let src = weights.data().slice(weight_offset..weight_offset + hidden_dim);
+        let mut dst = out.data_mut().slice_mut(data_offset..data_offset + hidden_dim);
+        dev.dtod_copy(&src, &mut dst)?
+    }
+    Ok(())
+}
+
 /// Regular matrix multiplication
 pub fn matmul(a: &Tensor, b: &Tensor, out: &mut Tensor) -> Result<(), SmeltError> {
     g_matmul::<false>(a, b, out)
@@ -334,137 +344,137 @@ pub fn broadcast_mul(a: &Tensor, b: &mut Tensor) -> Result<(), SmeltError> {
 }
 
 
-// /// Basic operation for the layernorm.
-// /// x = (x - x.mean()) / (x.var() + epsilon)
-// /// `mean` and `var` do not have to be initialized, they are simply passed to
-// /// avoid allocation.
-// pub fn normalize(x: &mut Tensor, epsilon: f32) -> Result<(), SmeltError> {
-//     let dim = x.shape().len();
-//     let size = x.shape()[dim - 1];
-//     x.data_mut().chunks_mut(size).for_each(|chunk| {
-//         let sum: f32 = chunk.iter().sum();
-//         let mean = sum / size as f32;
-//         chunk.iter_mut().for_each(|v| *v -= mean);
-//         let var: f32 = chunk.iter().map(|v| v * v).sum();
-//         let var = var / size as f32;
-//         let stddev: f32 = (var + epsilon).sqrt();
-//         chunk.iter_mut().for_each(|v| *v /= stddev);
-//     });
-//     Ok(())
-// }
-//
-// #[inline]
-// fn g_softmax<const CAUSAL: bool>(
-//     x: &mut Tensor,
-//     past_sequence_length: usize,
-// ) -> Result<(), SmeltError> {
-//     let dim = x.shape().len();
-//
-//     let m = x.shape()[dim - 2];
-//     let n = x.shape()[dim - 1];
-//
-//     x.data_mut()
-//         .chunks_mut(n)
-//         .enumerate()
-//         .for_each(|(i, chunk)| {
-//             let i = i % m;
-//             let mut current_max = f32::NEG_INFINITY;
-//             for (j, &v) in chunk.iter().enumerate() {
-//                 if (!CAUSAL || i + past_sequence_length >= j) && v > current_max {
-//                     current_max = v;
-//                 }
-//             }
-//             for v in chunk.iter_mut() {
-//                 *v -= current_max;
-//                 *v = (*v).exp();
-//             }
-//             let mut sum = 0.0;
-//             for (j, &v) in chunk.iter().enumerate() {
-//                 if !CAUSAL || i + past_sequence_length >= j {
-//                     sum += v;
-//                 }
-//             }
-//             for (j, v) in chunk.iter_mut().enumerate() {
-//                 if !CAUSAL || i + past_sequence_length >= j {
-//                     *v /= sum;
-//                 } else {
-//                     *v = 0.0;
-//                 }
-//             }
-//         });
-//     Ok(())
-// }
-//
-// /// Softmax on the last dimension for tensor `x`
-// pub fn softmax(x: &mut Tensor) -> Result<(), SmeltError> {
-//     g_softmax::<false>(x, 0)
-// }
-//
-// /// Causal softmax on the last dimension for tensor `x`. The causality is determined by the
-// /// shape of `x` and `past_sequence_length` which defines how big is the missing part of the
-// /// square.
-// pub fn causal_softmax(x: &mut Tensor, past_sequence_length: usize) -> Result<(), SmeltError> {
-//     g_softmax::<true>(x, past_sequence_length)
-// }
-//
-// /// Argmax of the last dimension of tensor `x `.
-// pub fn special_argmax(x: &Tensor) -> Result<usize, SmeltError> {
-//     if x.shape().len() != 2 {
-//         return Err(SmeltError::InvalidRank { expected_rank: 2 });
-//     }
-//     let n = x.shape()[0];
-//     let m = x.shape()[1];
-//
-//     let mut max = f32::NEG_INFINITY;
-//     let mut max_id = usize::MAX;
-//     for (i, &v) in x.data().iter().skip((n - 1) * m).enumerate() {
-//         if v > max {
-//             max = v;
-//             max_id = i;
-//         }
-//     }
-//     Ok(max_id)
-// }
-//
-// /// utility function to use a faster but less precise tanh
-// pub fn faster_tanh(x: f32) -> f32 {
-//     let x2 = x * x;
-//     let x3 = x2 * x;
-//     let x5 = x3 * x2;
-//
-//     let a = x + (0.16489087 * x3) + (0.00985468 * x5);
-//
-//     a / (1.0 + (a * a)).sqrt()
-// }
-//
-// /// utility function to use a faster but less precise tanh
-// #[inline]
-// pub fn inline_tanh(x: f32) -> f32 {
-//     1.0 - (2.0 / (1.0 + (2.0 * x).exp()))
-// }
-//
-// /// `gelu` operation
-// /// <https://en.wikipedia.org/wiki/Activation_function#Comparison_of_activation_functions>
-// /// but using [faster_tanh]
-// #[inline]
-// pub fn faster_gelu(v: f32) -> f32 {
-//     0.5 * (v)
-//         * (1.0 + faster_tanh((2.0f32 / std::f32::consts::PI).sqrt() * v * (1.0 + 0.044715 * v * v)))
-// }
-//
-// /// `gelu` operation
-// /// <https://en.wikipedia.org/wiki/Activation_function#Comparison_of_activation_functions>
-// #[inline]
-// pub fn gelu(v: f32) -> f32 {
-//     0.5 * (v)
-//         * (1.0 + inline_tanh((2.0f32 / std::f32::consts::PI).sqrt() * v * (1.0 + 0.044715 * v * v)))
-// }
-//
-// /// Applies `func` to every item of the tensor
-// pub fn apply<F: Fn(f32) -> f32 + Sync>(x: &mut Tensor, func: F) {
-//     x.data_mut().iter_mut().for_each(|v| *v = func(*v));
-// }
-//
+const NORMALIZE_PTX: &str = include_str!(concat!(env!("OUT_DIR"), "/normalize.ptx"));
+
+/// Basic operation for the layernorm.
+/// x = (x - x.mean()) / (x.var() + epsilon)
+/// `mean` and `var` do not have to be initialized, they are simply passed to
+/// avoid allocation.
+pub fn normalize(x: &mut Tensor, epsilon: f32) -> Result<(), SmeltError> {
+    let dim = x.shape().len();
+    let size = x.shape()[dim - 1];
+    let dev = x.device();
+
+    let module_name = "normalize_f32";
+     if !dev.has_func(module_name, module_name) {
+        dev
+            .load_ptx(NORMALIZE_PTX.into(), module_name, &[module_name])?;
+    }
+
+    let numel = dim;
+    let fwd_fn = dev.get_func(module_name, module_name).unwrap();
+    let cfg = LaunchConfig::for_num_elems(numel as u32);
+    let params = (numel, x.data_mut(), size, epsilon);
+    unsafe { fwd_fn.launch(cfg, params) }?;
+
+    Ok(())
+}
+
+
+const SOFTMAX_PTX: &str = include_str!(concat!(env!("OUT_DIR"), "/softmax.ptx"));
+
+#[inline]
+fn g_softmax<const CAUSAL: bool>(
+    x: &mut Tensor,
+    past_sequence_length: usize,
+) -> Result<(), SmeltError> {
+    let dim = x.shape().len();
+
+    let m = x.shape()[dim - 2];
+    let n = x.shape()[dim - 1];
+
+    let dev = x.device();
+
+    let module_name = "softmax_f32";
+     if !dev.has_func(module_name, module_name) {
+        dev
+            .load_ptx(SOFTMAX_PTX.into(), module_name, &[module_name])?;
+    }
+    let past_sequence_length = if CAUSAL{
+        past_sequence_length
+    }else{
+        n
+    };
+
+    let numel: usize = x.shape()[..dim - 1].iter().product();
+    let fwd_fn = dev.get_func(module_name, module_name).unwrap();
+    let cfg = LaunchConfig::for_num_elems(numel as u32);
+    let params = (numel, x.data_mut(), m, n, past_sequence_length);
+    unsafe { fwd_fn.launch(cfg, params) }?;
+
+    Ok(())
+}
+
+/// Softmax on the last dimension for tensor `x`
+pub fn softmax(x: &mut Tensor) -> Result<(), SmeltError> {
+    g_softmax::<false>(x, 0)
+}
+
+/// Causal softmax on the last dimension for tensor `x`. The causality is determined by the
+/// shape of `x` and `past_sequence_length` which defines how big is the missing part of the
+/// square.
+pub fn causal_softmax(x: &mut Tensor, past_sequence_length: usize) -> Result<(), SmeltError> {
+    g_softmax::<true>(x, past_sequence_length)
+}
+
+const UNITARY_PTX: &str = include_str!(concat!(env!("OUT_DIR"), "/unitary.ptx"));
+/// utility function to use a faster but less precise tanh
+#[inline]
+pub fn tanh(x: &mut Tensor) -> Result<(), SmeltError> {
+    let dev = x.device();
+    let module_name = "tanh_f32";
+     if !dev.has_func(module_name, module_name) {
+        dev
+            .load_ptx(UNITARY_PTX.into(), module_name, &[module_name])?;
+    }
+    let numel: usize = x.shape().iter().product();
+    let fwd_fn = dev.get_func(module_name, module_name).unwrap();
+    let cfg = LaunchConfig::for_num_elems(numel as u32);
+    let params = (numel, x.data_mut());
+    unsafe { fwd_fn.launch(cfg, params) }?;
+
+    Ok(())
+}
+
+/// `gelu` operation
+/// <https://en.wikipedia.org/wiki/Activation_function#Comparison_of_activation_functions>
+/// but using [faster_tanh]
+#[inline]
+pub fn gelu(x: &mut Tensor) -> Result<(), SmeltError> {
+    let module_name = "gelu_f32";
+    let dev = x.device();
+     if !dev.has_func(module_name, module_name) {
+        dev
+            .load_ptx(UNITARY_PTX.into(), module_name, &[module_name])?;
+    }
+    let numel: usize = x.shape().iter().product();
+    let fwd_fn = dev.get_func(module_name, module_name).unwrap();
+    let cfg = LaunchConfig::for_num_elems(numel as u32);
+    let params = (numel, x.data_mut());
+    unsafe { fwd_fn.launch(cfg, params) }?;
+    Ok(())
+
+}
+
+/// TODO
+#[inline]
+pub fn mul_scalar(x: &mut Tensor, factor: f32) -> Result<(), SmeltError> {
+    let dev = x.device();
+    let module_name = "mul_scalar_f32";
+     if !dev.has_func(module_name, module_name) {
+        dev
+            .load_ptx(UNITARY_PTX.into(), module_name, &[module_name])?;
+    }
+    let numel: usize = x.shape().iter().product();
+    let fwd_fn = dev.get_func(module_name, module_name).unwrap();
+    let cfg = LaunchConfig::for_num_elems(numel as u32);
+    let params = (numel, x.data_mut(), factor);
+    unsafe { fwd_fn.launch(cfg, params) }?;
+
+    Ok(())
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -595,83 +605,83 @@ mod tests {
         );
     }
 
-    //
-    //     #[test]
-    //     fn simple_softmax() {
-    //         let mut a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-    //         softmax(&mut a).unwrap();
-    //         assert_eq!(
-    //             simplify(a.data()),
-    //             // Values obtained through python
-    //             [0.2689, 0.7311, 0.2689, 0.7311]
-    //         );
-    //     }
-    //
-    //     #[test]
-    //     fn simple_causal_softmax() {
-    //         let mut a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-    //         // Large enough for the second test
-    //         causal_softmax(&mut a, 0).unwrap();
-    //         assert_eq!(
-    //             simplify(a.data()),
-    //             // Values obtained through python
-    //             [1.0000, 0.0000, 0.2689, 0.7311]
-    //         );
-    //
-    //         let mut a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-    //         causal_softmax(&mut a, 1).unwrap();
-    //         assert_eq!(
-    //             simplify(a.data()),
-    //             // Values obtained through python
-    //             [0.2689, 0.7311, 0.2689, 0.7311]
-    //         );
-    //
-    //         let data: Vec<_> = (0..12).map(|i| (i + 1) as f32).collect();
-    //         let mut a = Tensor::new(data, vec![3, 2, 2]).unwrap();
-    //         causal_softmax(&mut a, 0).unwrap();
-    //         assert_eq!(
-    //             simplify(a.data()),
-    //             // Values obtained through python
-    //             [
-    //                 1.0000, 0.0000, 0.2689, 0.7311, 1.0000, 0.0000, 0.2689, 0.7311, 1.0000, 0.0000,
-    //                 0.2689, 0.7311
-    //             ]
-    //         );
-    //
-    //         let data: Vec<_> = (0..12).map(|i| (i + 1) as f32).collect();
-    //         let mut a = Tensor::new(data, vec![2, 2, 3]).unwrap();
-    //         causal_softmax(&mut a, 1).unwrap();
-    //         assert_eq!(
-    //             simplify(a.data()),
-    //             // Values obtained through python
-    //             [
-    //                 0.2689, 0.7311, 0.0, 0.09, 0.2447, 0.6652, 0.2689, 0.7311, 0.0, 0.09, 0.2447,
-    //                 0.6652
-    //             ]
-    //         );
-    //     }
-    //
-    //     #[test]
-    //     fn simple_select() {
-    //         let a = Tensor::borrowed(&[1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-    //         let mut tensor = Tensor::zeros(vec![3, 2]);
-    //         select(&[1, 0, 0], &a, &mut tensor).unwrap();
-    //         assert_eq!(
-    //             simplify(tensor.data()),
-    //             // Values obtained through python
-    //             [3.0, 4.0, 1.0, 2.0, 1.0, 2.0]
-    //         );
-    //     }
-    //
-    //     #[test]
-    //     fn simple_normalize() {
-    //         let mut a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-    //         let epsilon = 1e-5;
-    //         normalize(&mut a, epsilon).unwrap();
-    //         assert_eq!(
-    //             simplify(a.data()),
-    //             // Values obtained through python
-    //             [-1.0, 1.0, -1.0, 1.0]
-    //         );
-    //     }
+    
+    #[test]
+    fn simple_softmax() {
+        let mut a = Tensor::from_cpu(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], 0).unwrap();
+        softmax(&mut a).unwrap();
+        assert_eq!(
+            simplify(&a.cpu_data().unwrap()),
+            // Values obtained through python
+            [0.2689, 0.7311, 0.2689, 0.7311]
+        );
+    }
+    
+    #[test]
+    fn simple_causal_softmax() {
+        let mut a = Tensor::from_cpu(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], 0).unwrap();
+        // Large enough for the second test
+        causal_softmax(&mut a, 0).unwrap();
+        assert_eq!(
+            simplify(&a.cpu_data().unwrap()),
+            // Values obtained through python
+            [1.0000, 0.0000, 0.2689, 0.7311]
+        );
+    
+        let mut a = Tensor::from_cpu(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], 0).unwrap();
+        causal_softmax(&mut a, 1).unwrap();
+        assert_eq!(
+            simplify(&a.cpu_data().unwrap()),
+            // Values obtained through python
+            [0.2689, 0.7311, 0.2689, 0.7311]
+        );
+    
+        let data: Vec<_> = (0..12).map(|i| (i + 1) as f32).collect();
+        let mut a = Tensor::from_cpu(data, vec![3, 2, 2], 0).unwrap();
+        causal_softmax(&mut a, 0).unwrap();
+        assert_eq!(
+            simplify(&a.cpu_data().unwrap()),
+            // Values obtained through python
+            [
+                1.0000, 0.0000, 0.2689, 0.7311, 1.0000, 0.0000, 0.2689, 0.7311, 1.0000, 0.0000,
+                0.2689, 0.7311
+            ]
+        );
+    
+        let data: Vec<_> = (0..12).map(|i| (i + 1) as f32).collect();
+        let mut a = Tensor::from_cpu(data, vec![2, 2, 3], 0).unwrap();
+        causal_softmax(&mut a, 1).unwrap();
+        assert_eq!(
+            simplify(&a.cpu_data().unwrap()),
+            // Values obtained through python
+            [
+                0.2689, 0.7311, 0.0, 0.09, 0.2447, 0.6652, 0.2689, 0.7311, 0.0, 0.09, 0.2447,
+                0.6652
+            ]
+        );
+    }
+    
+    #[test]
+    fn simple_select() {
+        let a = Tensor::from_cpu(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], 0).unwrap();
+        let mut tensor = Tensor::zeros(vec![3, 2], 0).unwrap();
+        select(&[1, 0, 0], &a, &mut tensor).unwrap();
+        assert_eq!(
+            simplify(&tensor.cpu_data().unwrap()),
+            // Values obtained through python
+            [3.0, 4.0, 1.0, 2.0, 1.0, 2.0]
+        );
+    }
+
+    #[test]
+    fn simple_normalize() {
+        let mut a = Tensor::from_cpu(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], 0).unwrap();
+        let epsilon = 1e-5;
+        normalize(&mut a, epsilon).unwrap();
+        assert_eq!(
+            simplify(&a.cpu_data().unwrap()),
+            // Values obtained through python
+            [-1.0, 1.0, -1.0, 1.0]
+        );
+    }
 }
