@@ -19,11 +19,17 @@ impl<'a> TensorAdd<Tensor<'a>> for Tensor<'a> {
     fn add(x: &Self, y: &mut Self) -> Result<(), SmeltError> {
         ops::add(x, y)
     }
+    fn broadcast_add(x: &Self, y: &mut Self) -> Result<(), SmeltError> {
+        ops::broadcast_add(x, y)
+    }
 }
 
 impl<'a> TensorMul<Tensor<'a>> for Tensor<'a> {
     fn mul(x: &Self, y: &mut Self) -> Result<(), SmeltError> {
         ops::mul(x, y)
+    }
+    fn broadcast_mul(x: &Self, y: &mut Self) -> Result<(), SmeltError> {
+        ops::broadcast_mul(x, y)
     }
 }
 

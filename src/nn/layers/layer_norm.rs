@@ -22,8 +22,8 @@ impl<T: Tensor + TensorOps<T>> LayerNorm<T> {
     /// TODO
     pub fn forward(&self, tensor: &mut T) -> Result<(), SmeltError> {
         T::normalize(tensor, self.epsilon)?;
-        T::mul(&self.weight, tensor)?;
-        T::add(&self.bias, tensor)
+        T::broadcast_mul(&self.weight, tensor)?;
+        T::broadcast_add(&self.bias, tensor)
     }
 }
 

@@ -146,9 +146,7 @@ fn g_matmul<'a, const TRANSPOSE: bool>(
     let b_skip: usize = n * k;
     let c_skip: usize = m * n;
 
-
     let blas = CudaBlas::new(a.device())?;
-
 
     let (m, n, k) = (m as libc::c_int, n as libc::c_int, k as libc::c_int);
 
@@ -401,7 +399,7 @@ mod tests {
         let b = Tensor::from_cpu(vec![3.0, 4.0], vec![1, 2], device_id).unwrap();
         let mut c = Tensor::zeros(vec![3, 2], device_id).unwrap();
         matmul(&a, &b, &mut c).unwrap();
-        assert_eq!(c.cpu_data().unwrap(), &[ 3.0,  4.0,  6.0,  8.0,  9.0, 12.0]);
+        assert_eq!(c.cpu_data().unwrap(), &[3.0, 4.0, 6.0, 8.0, 9.0, 12.0]);
 
         let data: Vec<_> = (0..6).map(|i| i as f32).collect();
         let a = Tensor::from_cpu(data, vec![2, 3], device_id).unwrap();
@@ -409,7 +407,10 @@ mod tests {
         let b = Tensor::from_cpu(data, vec![3, 4], device_id).unwrap();
         let mut c = Tensor::zeros(vec![2, 4], device_id).unwrap();
         matmul(&a, &b, &mut c).unwrap();
-        assert_eq!(c.cpu_data().unwrap(), &[26.,  29.,  32.,  35.,  80.,  92., 104., 116.]);
+        assert_eq!(
+            c.cpu_data().unwrap(),
+            &[26., 29., 32., 35., 80., 92., 104., 116.]
+        );
 
         let data: Vec<_> = (0..12).map(|i| i as f32).collect();
         let a = Tensor::from_cpu(data, vec![2, 2, 3], device_id).unwrap();
@@ -419,8 +420,10 @@ mod tests {
         matmul(&a, &b, &mut c).unwrap();
         assert_eq!(
             c.cpu_data().unwrap(),
-            &[ 26.,  29.,  32.,  35.,  80.,  92., 104., 116., 386., 407., 428., 449.,
-        548., 578., 608., 638.]
+            &[
+                26., 29., 32., 35., 80., 92., 104., 116., 386., 407., 428., 449., 548., 578., 608.,
+                638.
+            ]
         );
     }
 
@@ -447,7 +450,10 @@ mod tests {
         let b = Tensor::from_cpu(data, vec![4, 3], device_id).unwrap();
         let mut c = Tensor::zeros(vec![2, 4], device_id).unwrap();
         matmul_t(&a, &b, &mut c).unwrap();
-        assert_eq!(c.cpu_data().unwrap(), &[11.,  20.,  29.,  38.,  38.,  74., 110., 146.]);
+        assert_eq!(
+            c.cpu_data().unwrap(),
+            &[11., 20., 29., 38., 38., 74., 110., 146.]
+        );
 
         let data: Vec<_> = (0..12).map(|i| i as f32).collect();
         let a = Tensor::from_cpu(data, vec![2, 2, 3], device_id).unwrap();
@@ -457,8 +463,10 @@ mod tests {
         matmul_t(&a, &b, &mut c).unwrap();
         assert_eq!(
             c.cpu_data().unwrap(),
-            &[ 11.,  20.,  29.,  38.,  38.,  74., 110., 146., 317., 380., 443., 506.,
-        452., 542., 632., 722.]
+            &[
+                11., 20., 29., 38., 38., 74., 110., 146., 317., 380., 443., 506., 452., 542., 632.,
+                722.
+            ]
         );
     }
     //

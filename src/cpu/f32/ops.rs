@@ -183,55 +183,73 @@ fn g_matmul<'a, const TRANSPOSE: bool>(
 }
 
 /// tensor elementwise addition. b += a.
-/// a is automatically broadcasted.
 pub fn add(a: &Tensor, b: &mut Tensor) -> Result<(), SmeltError> {
-    if a.shape() == b.shape() {
-        a.data()
-            .iter()
-            .zip(b.data_mut().iter_mut())
-            .for_each(|(left, right)| *right += left);
-        Ok(())
-    } else if &b.shape()[1..] == a.shape() {
-        let n = b.shape()[0];
-        (0..n).for_each(|i| {
-            a.data()
-                .iter()
-                .zip(b.data_mut().iter_mut().skip(i * a.shape()[0]))
-                .for_each(|(left, right)| *right += left);
-        });
-        Ok(())
-    } else {
-        Err(SmeltError::DimensionMismatch {
+    if a.shape() != b.shape() {
+        return Err(SmeltError::DimensionMismatch {
             expected: b.shape().to_vec(),
             got: a.shape().to_vec(),
-        })
+        });
     }
+    a.data()
+        .iter()
+        .zip(b.data_mut().iter_mut())
+        .for_each(|(left, right)| *right += left);
+    Ok(())
 }
 
-/// tensor elementwise multiplication. b *= a.
-/// a is automatically broadcasted.
-pub fn mul(a: &Tensor, b: &mut Tensor) -> Result<(), SmeltError> {
-    if a.shape() == b.shape() {
-        a.data()
-            .iter()
-            .zip(b.data_mut().iter_mut())
-            .for_each(|(left, right)| *right *= left);
-        Ok(())
-    } else if &b.shape()[1..] == a.shape() {
-        let n = b.shape()[0];
-        (0..n).for_each(|i| {
-            a.data()
-                .iter()
-                .zip(b.data_mut().iter_mut().skip(i * a.shape()[0]))
-                .for_each(|(left, right)| *right *= left);
-        });
-        Ok(())
-    } else {
-        Err(SmeltError::DimensionMismatch {
+/// broacasted tensor elementwise addition. b += a.
+pub fn broadcast_add(a: &Tensor, b: &mut Tensor) -> Result<(), SmeltError> {
+    if &b.shape()[1..] != a.shape() {
+        return Err(SmeltError::DimensionMismatch {
             expected: b.shape().to_vec(),
             got: a.shape().to_vec(),
-        })
+        });
     }
+    let n = b.shape()[0];
+    let skip: usize = a.shape().iter().product();
+    (0..n).for_each(|i| {
+        a.data()
+            .iter()
+            .zip(b.data_mut().iter_mut().skip(i * skip))
+            .for_each(|(left, right)| *right += left);
+    });
+    Ok(())
+
+}
+
+/// tensor elementwise multiplication. b += a.
+pub fn mul(a: &Tensor, b: &mut Tensor) -> Result<(), SmeltError> {
+    if a.shape() != b.shape() {
+        return Err(SmeltError::DimensionMismatch {
+            expected: b.shape().to_vec(),
+            got: a.shape().to_vec(),
+        });
+    }
+    a.data()
+        .iter()
+        .zip(b.data_mut().iter_mut())
+        .for_each(|(left, right)| *right *= left);
+    Ok(())
+}
+
+/// broacasted tensor elementwise multiplication. b += a.
+pub fn broadcast_mul(a: &Tensor, b: &mut Tensor) -> Result<(), SmeltError> {
+    if &b.shape()[1..] != a.shape() {
+        return Err(SmeltError::DimensionMismatch {
+            expected: b.shape().to_vec(),
+            got: a.shape().to_vec(),
+        });
+    }
+    let n = b.shape()[0];
+    let skip: usize = a.shape().iter().product();
+    (0..n).for_each(|i| {
+        a.data()
+            .iter()
+            .zip(b.data_mut().iter_mut().skip(i * skip))
+            .for_each(|(left, right)| *right *= left);
+    });
+    Ok(())
+
 }
 
 /// Basic operation for the layernorm.
