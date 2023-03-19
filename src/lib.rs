@@ -96,6 +96,10 @@
 /// The various CPU implementations
 pub mod cpu;
 
+/// The various GPU implementations
+#[cfg(feature = "gpu")]
+pub mod gpu;
+
 /// The neural networks
 pub mod nn;
 
