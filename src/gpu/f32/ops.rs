@@ -1,3 +1,38 @@
+use crate::gpu::f32::Tensor;
+use crate::SmeltError;
+use cudarc::cublas::result::CublasError;
+use cudarc::cublas::safe::{CudaBlas, GemmConfig, StridedBatchedConfig};
+use cudarc::cublas::sys::cublasOperation_t::{CUBLAS_OP_N as NoTr, CUBLAS_OP_T as Tr};
+use cudarc::cublas::Gemm;
+use cudarc::driver::DriverError;
+
+/// All potential errors linked specifically to cuda.
+#[derive(Debug, Clone)]
+pub enum CudaError {
+    /// Tried an operation with tensors on different devices.
+    TensorOnDifferentDevice {
+        /// TODO
+        got: usize,
+        /// TODO
+        expected: usize,
+    },
+    /// Error with cublas library
+    CublasError(CublasError),
+    /// Error with cuda driver.
+    DriverError(DriverError),
+}
+
+impl From<CublasError> for SmeltError {
+    fn from(cublas: CublasError) -> Self {
+        Self::Cuda(CudaError::CublasError(cublas))
+    }
+}
+
+impl From<DriverError> for SmeltError {
+    fn from(cublas: DriverError) -> Self {
+        Self::Cuda(CudaError::DriverError(cublas))
+    }
+}
 // use crate::gpu::f32::tensor::Tensor;
 // use crate::SmeltError;
 //
@@ -26,152 +61,139 @@
 //     Ok(())
 // }
 //
-// /// Regular matrix multiplication
-// pub fn matmul<'a>(a: &Tensor<'a>, b: &Tensor<'a>, out: &mut Tensor<'a>) -> Result<(), SmeltError> {
-//     g_matmul::<false>(a, b, out)
-// }
-//
-// /// Matrix multiplication matmul(A, B.transposed())
-// pub fn matmul_t<'a>(
-//     a: &Tensor<'a>,
-//     b: &Tensor<'a>,
-//     out: &mut Tensor<'a>,
-// ) -> Result<(), SmeltError> {
-//     g_matmul::<true>(a, b, out)
-// }
-//
-// #[inline]
-// fn g_matmul<'a, const TRANSPOSE: bool>(
-//     a: &Tensor<'a>,
-//     b: &Tensor<'a>,
-//     c: &mut Tensor<'a>,
-// ) -> Result<(), SmeltError> {
-//     let dim = a.shape().len();
-//
-//     if dim < 2 {
-//         return Err(SmeltError::InsufficientRank { minimum_rank: 2 });
-//     }
-//     if b.shape().len() != dim {
-//         return Err(SmeltError::InvalidRank { expected_rank: dim });
-//     }
-//     if c.shape().len() != dim {
-//         return Err(SmeltError::InvalidRank { expected_rank: dim });
-//     }
-//
-//     let m = a.shape()[dim - 2];
-//     let k = a.shape()[dim - 1];
-//
-//     let mut expected_c = a.shape().to_vec();
-//     let mut expected_b = a.shape().to_vec();
-//
-//     let (expected_b, n) = if TRANSPOSE {
-//         let n = b.shape()[dim - 2];
-//         expected_b[dim - 2] = n;
-//         expected_b[dim - 1] = k;
-//         (expected_b, n)
-//     } else {
-//         let n = b.shape()[dim - 1];
-//         expected_b[dim - 2] = k;
-//         expected_b[dim - 1] = n;
-//         (expected_b, n)
-//     };
-//
-//     expected_c[dim - 2] = m;
-//     expected_c[dim - 1] = n;
-//
-//     if expected_b != b.shape() {
-//         return Err(SmeltError::DimensionMismatch {
-//             expected: expected_b,
-//             got: b.shape().to_vec(),
-//         });
-//     }
-//
-//     if expected_c != c.shape() {
-//         return Err(SmeltError::DimensionMismatch {
-//             expected: expected_c,
-//             got: c.shape().to_vec(),
-//         });
-//     }
-//
-//     // Zero out c
-//     c.data_mut().iter_mut().for_each(|v| *v = 0.0);
-//
-//     let batching: usize = a.shape()[..dim - 2].iter().product();
-//     let a_skip: usize = m * k;
-//     let b_skip: usize = n * k;
-//     let c_skip: usize = m * n;
-//
-//     let ar = k as isize;
-//     let ac = 1;
-//     let (br, bc) = if TRANSPOSE {
-//         (1, b.shape()[dim - 1] as isize)
-//     } else {
-//         (b.shape()[dim - 1] as isize, 1)
-//     };
-//     let cr = n as isize;
-//     let cc = 1;
-//
-//     (0..batching).for_each(|step| {
-//         let ap = &a.data()[step * a_skip..];
-//         let bp = &b.data()[step * b_skip..];
-//         let cp = &mut c.data_mut()[step * c_skip..];
-//
-//         #[cfg(feature = "matrixmultiply")]
-//         unsafe {
-//             sgemm(
-//                 m,
-//                 k,
-//                 n,
-//                 1.0,
-//                 ap.as_ptr(),
-//                 ar,
-//                 ac,
-//                 bp.as_ptr(),
-//                 br,
-//                 bc,
-//                 1.0,
-//                 cp.as_mut_ptr(),
-//                 cr,
-//                 cc,
-//             );
-//         }
-//
-//         #[cfg(feature = "cblas")]
-//         unsafe {
-//             let (m, n, k) = (m as libc::c_int, n as libc::c_int, k as libc::c_int);
-//             let (layout, a_tr, b_tr, lda, ldb, ldc) = if cr < cc {
-//                 let (lda, a_tr) = if ar < ac { (m, NoTr) } else { (k, Tr) };
-//                 let (ldb, b_tr) = if br < bc { (k, NoTr) } else { (n, Tr) };
-//                 (ColMajor, a_tr, b_tr, lda, ldb, m)
-//             } else {
-//                 let (lda, a_tr) = if ar < ac { (m, Tr) } else { (k, NoTr) };
-//                 let (ldb, b_tr) = if br < bc { (k, Tr) } else { (n, NoTr) };
-//                 (RowMajor, a_tr, b_tr, lda, ldb, n)
-//             };
-//             sgemm(
-//                 layout,
-//                 a_tr,
-//                 b_tr,
-//                 m,
-//                 n,
-//                 k,
-//                 1.0,
-//                 ap.as_ptr(),
-//                 lda,
-//                 // a_skip as i32,
-//                 bp.as_ptr(),
-//                 ldb,
-//                 // b_skip as i32,
-//                 1.0,
-//                 cp.as_mut_ptr(),
-//                 ldc,
-//                 // c_skip as i32,
-//                 // batching as i32,
-//             )
-//         }
-//     });
-//     Ok(())
-// }
+/// Regular matrix multiplication
+pub fn matmul(a: &Tensor, b: &Tensor, out: &mut Tensor) -> Result<(), SmeltError> {
+    g_matmul::<false>(a, b, out)
+}
+
+/// Matrix multiplication matmul(A, B.transposed())
+pub fn matmul_t(a: &Tensor, b: &Tensor, out: &mut Tensor) -> Result<(), SmeltError> {
+    g_matmul::<true>(a, b, out)
+}
+
+#[inline]
+fn g_matmul<'a, const TRANSPOSE: bool>(
+    a: &Tensor,
+    b: &Tensor,
+    c: &mut Tensor,
+) -> Result<(), SmeltError> {
+    let dim = a.shape().len();
+
+    if a.device_id() != b.device_id() {
+        return Err(SmeltError::Cuda(CudaError::TensorOnDifferentDevice {
+            got: b.device_id(),
+            expected: a.device_id(),
+        }));
+    }
+    if a.device_id() != c.device_id() {
+        return Err(SmeltError::Cuda(CudaError::TensorOnDifferentDevice {
+            got: c.device_id(),
+            expected: a.device_id(),
+        }));
+    }
+
+    if dim < 2 {
+        return Err(SmeltError::InsufficientRank { minimum_rank: 2 });
+    }
+    if b.shape().len() != dim {
+        return Err(SmeltError::InvalidRank { expected_rank: dim });
+    }
+    if c.shape().len() != dim {
+        return Err(SmeltError::InvalidRank { expected_rank: dim });
+    }
+
+    let m = a.shape()[dim - 2];
+    let k = a.shape()[dim - 1];
+
+    let mut expected_c = a.shape().to_vec();
+    let mut expected_b = a.shape().to_vec();
+
+    let (expected_b, n) = if TRANSPOSE {
+        let n = b.shape()[dim - 2];
+        expected_b[dim - 2] = n;
+        expected_b[dim - 1] = k;
+        (expected_b, n)
+    } else {
+        let n = b.shape()[dim - 1];
+        expected_b[dim - 2] = k;
+        expected_b[dim - 1] = n;
+        (expected_b, n)
+    };
+
+    expected_c[dim - 2] = m;
+    expected_c[dim - 1] = n;
+
+    if expected_b != b.shape() {
+        return Err(SmeltError::DimensionMismatch {
+            expected: expected_b,
+            got: b.shape().to_vec(),
+        });
+    }
+
+    if expected_c != c.shape() {
+        return Err(SmeltError::DimensionMismatch {
+            expected: expected_c,
+            got: c.shape().to_vec(),
+        });
+    }
+
+    // TODO Maybe Zero out c
+    // c.data_mut().iter_mut().for_each(|v| *v = 0.0);
+    c.device().memset_zeros(c.data_mut())?;
+
+    let batching: usize = a.shape()[..dim - 2].iter().product();
+    let a_skip: usize = m * k;
+    let b_skip: usize = n * k;
+    let c_skip: usize = m * n;
+
+
+    let blas = CudaBlas::new(a.device())?;
+
+
+    let (m, n, k) = (m as libc::c_int, n as libc::c_int, k as libc::c_int);
+
+    // Swap everything around
+    // Cublas uses col major format, so it will read
+    // A as A.T
+    // B as B.t
+    // So we calculate in C.T <- matmul(B.t, A.t)
+    // But since C.t in read by us in row major, it is already C.
+
+    let (m, n, k) = (n, m, k);
+    let (a_skip, b_skip) = (b_skip, a_skip);
+    let (a, b) = (b, a);
+
+    let (ldb, ldc) = (k, m);
+    let (lda, transa) = if TRANSPOSE { (k, Tr) } else { (m, NoTr) };
+
+    let transb = NoTr;
+
+    let cfg = GemmConfig {
+        transa,
+        transb,
+        m,
+        n,
+        k,
+        alpha: 1.0,
+        lda,
+        ldb,
+        beta: 1.0,
+        ldc,
+    };
+
+    let strided_config = StridedBatchedConfig {
+        gemm: cfg,
+        batch_size: batching as i32,
+        stride_a: a_skip as i64,
+        stride_b: b_skip as i64,
+        stride_c: c_skip as i64,
+    };
+    unsafe {
+        blas.gemm_strided_batched(strided_config, &*a.data(), &*b.data(), &mut *c.data_mut())?;
+    }
+
+    Ok(())
+}
 //
 // /// tensor elementwise addition. b += a.
 // /// a is automatically broadcasted.
@@ -356,160 +378,166 @@
 //     x.data_mut().iter_mut().for_each(|v| *v = func(*v));
 // }
 //
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use crate::tests::simplify;
-//
-//     #[test]
-//     fn simple_matmul() {
-//         let data = vec![1.0, 2.0, 3.0, 4.0];
-//         let a = Tensor::new(data, vec![2, 2]).unwrap();
-//         let data = [1.0, 2.0, 3.0, 4.0];
-//         let b = Tensor::borrowed(&data, vec![2, 2]).unwrap();
-//         let data = vec![0.0; 4];
-//         let mut c = Tensor::new(data, vec![2, 2]).unwrap();
-//
-//         matmul(&a, &b, &mut c).unwrap();
-//         assert_eq!(c.data(), &[7.0, 10.0, 15.0, 22.0]);
-//         matmul(&a, &b, &mut c).unwrap();
-//         assert_eq!(c.data(), &[7.0, 10.0, 15.0, 22.0]);
-//
-//         let data = vec![1.0, 2.0];
-//         let a = Tensor::new(data, vec![2, 1]).unwrap();
-//         let data = [3.0, 4.0];
-//         let b = Tensor::borrowed(&data, vec![1, 2]).unwrap();
-//         let data = vec![0.0; 4];
-//         let mut c = Tensor::new(data, vec![2, 2]).unwrap();
-//         matmul(&a, &b, &mut c).unwrap();
-//         assert_eq!(c.data(), &[3.0, 4.0, 6.0, 8.0]);
-//
-//         let data: Vec<_> = (0..6).map(|i| i as f32).collect();
-//         let a = Tensor::new(data, vec![2, 3]).unwrap();
-//         let data: Vec<_> = (0..6).map(|i| (i + 2) as f32).collect();
-//         let b = Tensor::new(data, vec![3, 2]).unwrap();
-//         let mut c = Tensor::zeros(vec![2, 2]);
-//         matmul(&a, &b, &mut c).unwrap();
-//         assert_eq!(c.data(), &[16., 19., 52., 64.]);
-//
-//         let data: Vec<_> = (0..12).map(|i| i as f32).collect();
-//         let a = Tensor::new(data, vec![2, 2, 3]).unwrap();
-//         let data: Vec<_> = (0..12).map(|i| (i + 2) as f32).collect();
-//         let b = Tensor::new(data, vec![2, 3, 2]).unwrap();
-//         let mut c: Tensor = Tensor::zeros(vec![2, 2, 2]);
-//         matmul(&a, &b, &mut c).unwrap();
-//         assert_eq!(c.data(), &[16., 19., 52., 64., 214., 235., 304., 334.]);
-//     }
-//
-//     #[test]
-//     fn simple_matmul_t() {
-//         let a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-//         // A.T
-//         let b = Tensor::borrowed(&[1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
-//         let mut c = Tensor::zeros(vec![2, 2]);
-//
-//         matmul_t(&a, &b, &mut c).unwrap();
-//         assert_eq!(c.data(), &[7.0, 10.0, 15.0, 22.0]);
-//
-//         let a = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-//         let b = Tensor::borrowed(&[3.0, 4.0], vec![2, 1]).unwrap();
-//         let mut c = Tensor::zeros(vec![2, 2]);
-//         matmul_t(&a, &b, &mut c).unwrap();
-//         assert_eq!(c.data(), &[3.0, 4.0, 6.0, 8.0]);
-//
-//         let data: Vec<_> = (0..6).map(|i| i as f32).collect();
-//         let a = Tensor::new(data, vec![2, 3]).unwrap();
-//         let data: Vec<_> = (0..6).map(|i| (i + 2) as f32).collect();
-//         let b = Tensor::new(data, vec![2, 3]).unwrap();
-//         let mut c = Tensor::zeros(vec![2, 2]);
-//         matmul_t(&a, &b, &mut c).unwrap();
-//         assert_eq!(c.data(), &[11., 20., 38., 74.]);
-//
-//         let data: Vec<_> = (0..12).map(|i| i as f32).collect();
-//         let a = Tensor::new(data, vec![2, 2, 3]).unwrap();
-//         let data: Vec<_> = (0..12).map(|i| (i + 2) as f32).collect();
-//         let b = Tensor::new(data, vec![2, 2, 3]).unwrap();
-//         let mut c = Tensor::zeros(vec![2, 2, 2]);
-//         matmul_t(&a, &b, &mut c).unwrap();
-//         assert_eq!(c.data(), &[11., 20., 38., 74., 191., 254., 272., 362.]);
-//     }
-//
-//     #[test]
-//     fn simple_softmax() {
-//         let mut a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-//         softmax(&mut a).unwrap();
-//         assert_eq!(
-//             simplify(a.data()),
-//             // Values obtained through python
-//             [0.2689, 0.7311, 0.2689, 0.7311]
-//         );
-//     }
-//
-//     #[test]
-//     fn simple_causal_softmax() {
-//         let mut a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-//         // Large enough for the second test
-//         causal_softmax(&mut a, 0).unwrap();
-//         assert_eq!(
-//             simplify(a.data()),
-//             // Values obtained through python
-//             [1.0000, 0.0000, 0.2689, 0.7311]
-//         );
-//
-//         let mut a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-//         causal_softmax(&mut a, 1).unwrap();
-//         assert_eq!(
-//             simplify(a.data()),
-//             // Values obtained through python
-//             [0.2689, 0.7311, 0.2689, 0.7311]
-//         );
-//
-//         let data: Vec<_> = (0..12).map(|i| (i + 1) as f32).collect();
-//         let mut a = Tensor::new(data, vec![3, 2, 2]).unwrap();
-//         causal_softmax(&mut a, 0).unwrap();
-//         assert_eq!(
-//             simplify(a.data()),
-//             // Values obtained through python
-//             [
-//                 1.0000, 0.0000, 0.2689, 0.7311, 1.0000, 0.0000, 0.2689, 0.7311, 1.0000, 0.0000,
-//                 0.2689, 0.7311
-//             ]
-//         );
-//
-//         let data: Vec<_> = (0..12).map(|i| (i + 1) as f32).collect();
-//         let mut a = Tensor::new(data, vec![2, 2, 3]).unwrap();
-//         causal_softmax(&mut a, 1).unwrap();
-//         assert_eq!(
-//             simplify(a.data()),
-//             // Values obtained through python
-//             [
-//                 0.2689, 0.7311, 0.0, 0.09, 0.2447, 0.6652, 0.2689, 0.7311, 0.0, 0.09, 0.2447,
-//                 0.6652
-//             ]
-//         );
-//     }
-//
-//     #[test]
-//     fn simple_select() {
-//         let a = Tensor::borrowed(&[1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-//         let mut tensor = Tensor::zeros(vec![3, 2]);
-//         select(&[1, 0, 0], &a, &mut tensor).unwrap();
-//         assert_eq!(
-//             simplify(tensor.data()),
-//             // Values obtained through python
-//             [3.0, 4.0, 1.0, 2.0, 1.0, 2.0]
-//         );
-//     }
-//
-//     #[test]
-//     fn simple_normalize() {
-//         let mut a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-//         let epsilon = 1e-5;
-//         normalize(&mut a, epsilon).unwrap();
-//         assert_eq!(
-//             simplify(a.data()),
-//             // Values obtained through python
-//             [-1.0, 1.0, -1.0, 1.0]
-//         );
-//     }
-// }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tests::simplify;
+
+    #[test]
+    fn simple_matmul() {
+        let device_id = 0;
+        let data = vec![1.0, 2.0, 3.0, 4.0];
+        let a = Tensor::from_cpu(data.clone(), vec![2, 2], device_id).unwrap();
+        let b = Tensor::from_cpu(data, vec![2, 2], device_id).unwrap();
+        let mut c = Tensor::zeros(vec![2, 2], device_id).unwrap();
+
+        matmul(&a, &b, &mut c).unwrap();
+        assert_eq!(c.cpu_data().unwrap(), &[7.0, 10.0, 15.0, 22.0]);
+        matmul(&a, &b, &mut c).unwrap();
+        assert_eq!(c.cpu_data().unwrap(), &[7.0, 10.0, 15.0, 22.0]);
+
+        let data = vec![1.0, 2.0, 3.0];
+        let a = Tensor::from_cpu(data, vec![3, 1], device_id).unwrap();
+        let b = Tensor::from_cpu(vec![3.0, 4.0], vec![1, 2], device_id).unwrap();
+        let mut c = Tensor::zeros(vec![3, 2], device_id).unwrap();
+        matmul(&a, &b, &mut c).unwrap();
+        assert_eq!(c.cpu_data().unwrap(), &[ 3.0,  4.0,  6.0,  8.0,  9.0, 12.0]);
+
+        let data: Vec<_> = (0..6).map(|i| i as f32).collect();
+        let a = Tensor::from_cpu(data, vec![2, 3], device_id).unwrap();
+        let data: Vec<_> = (0..12).map(|i| (i + 2) as f32).collect();
+        let b = Tensor::from_cpu(data, vec![3, 4], device_id).unwrap();
+        let mut c = Tensor::zeros(vec![2, 4], device_id).unwrap();
+        matmul(&a, &b, &mut c).unwrap();
+        assert_eq!(c.cpu_data().unwrap(), &[26.,  29.,  32.,  35.,  80.,  92., 104., 116.]);
+
+        let data: Vec<_> = (0..12).map(|i| i as f32).collect();
+        let a = Tensor::from_cpu(data, vec![2, 2, 3], device_id).unwrap();
+        let data: Vec<_> = (0..24).map(|i| (i + 2) as f32).collect();
+        let b = Tensor::from_cpu(data, vec![2, 3, 4], device_id).unwrap();
+        let mut c: Tensor = Tensor::zeros(vec![2, 2, 4], device_id).unwrap();
+        matmul(&a, &b, &mut c).unwrap();
+        assert_eq!(
+            c.cpu_data().unwrap(),
+            &[ 26.,  29.,  32.,  35.,  80.,  92., 104., 116., 386., 407., 428., 449.,
+        548., 578., 608., 638.]
+        );
+    }
+
+    #[test]
+    fn simple_matmul_t() {
+        let device_id = 0;
+        let a = Tensor::from_cpu(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], device_id).unwrap();
+        // A.T
+        let b = Tensor::from_cpu(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2], device_id).unwrap();
+        let mut c = Tensor::zeros(vec![2, 2], device_id).unwrap();
+
+        matmul_t(&a, &b, &mut c).unwrap();
+        assert_eq!(c.cpu_data().unwrap(), &[7.0, 10.0, 15.0, 22.0]);
+
+        let a = Tensor::from_cpu(vec![1.0, 2.0], vec![2, 1], device_id).unwrap();
+        let b = Tensor::from_cpu(vec![3.0, 4.0], vec![2, 1], device_id).unwrap();
+        let mut c = Tensor::zeros(vec![2, 2], device_id).unwrap();
+        matmul_t(&a, &b, &mut c).unwrap();
+        assert_eq!(c.cpu_data().unwrap(), &[3.0, 4.0, 6.0, 8.0]);
+
+        let data: Vec<_> = (0..6).map(|i| i as f32).collect();
+        let a = Tensor::from_cpu(data, vec![2, 3], device_id).unwrap();
+        let data: Vec<_> = (0..12).map(|i| (i + 2) as f32).collect();
+        let b = Tensor::from_cpu(data, vec![4, 3], device_id).unwrap();
+        let mut c = Tensor::zeros(vec![2, 4], device_id).unwrap();
+        matmul_t(&a, &b, &mut c).unwrap();
+        assert_eq!(c.cpu_data().unwrap(), &[11.,  20.,  29.,  38.,  38.,  74., 110., 146.]);
+
+        let data: Vec<_> = (0..12).map(|i| i as f32).collect();
+        let a = Tensor::from_cpu(data, vec![2, 2, 3], device_id).unwrap();
+        let data: Vec<_> = (0..24).map(|i| (i + 2) as f32).collect();
+        let b = Tensor::from_cpu(data, vec![2, 4, 3], device_id).unwrap();
+        let mut c = Tensor::zeros(vec![2, 2, 4], device_id).unwrap();
+        matmul_t(&a, &b, &mut c).unwrap();
+        assert_eq!(
+            c.cpu_data().unwrap(),
+            &[ 11.,  20.,  29.,  38.,  38.,  74., 110., 146., 317., 380., 443., 506.,
+        452., 542., 632., 722.]
+        );
+    }
+    //
+    //     #[test]
+    //     fn simple_softmax() {
+    //         let mut a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+    //         softmax(&mut a).unwrap();
+    //         assert_eq!(
+    //             simplify(a.data()),
+    //             // Values obtained through python
+    //             [0.2689, 0.7311, 0.2689, 0.7311]
+    //         );
+    //     }
+    //
+    //     #[test]
+    //     fn simple_causal_softmax() {
+    //         let mut a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+    //         // Large enough for the second test
+    //         causal_softmax(&mut a, 0).unwrap();
+    //         assert_eq!(
+    //             simplify(a.data()),
+    //             // Values obtained through python
+    //             [1.0000, 0.0000, 0.2689, 0.7311]
+    //         );
+    //
+    //         let mut a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+    //         causal_softmax(&mut a, 1).unwrap();
+    //         assert_eq!(
+    //             simplify(a.data()),
+    //             // Values obtained through python
+    //             [0.2689, 0.7311, 0.2689, 0.7311]
+    //         );
+    //
+    //         let data: Vec<_> = (0..12).map(|i| (i + 1) as f32).collect();
+    //         let mut a = Tensor::new(data, vec![3, 2, 2]).unwrap();
+    //         causal_softmax(&mut a, 0).unwrap();
+    //         assert_eq!(
+    //             simplify(a.data()),
+    //             // Values obtained through python
+    //             [
+    //                 1.0000, 0.0000, 0.2689, 0.7311, 1.0000, 0.0000, 0.2689, 0.7311, 1.0000, 0.0000,
+    //                 0.2689, 0.7311
+    //             ]
+    //         );
+    //
+    //         let data: Vec<_> = (0..12).map(|i| (i + 1) as f32).collect();
+    //         let mut a = Tensor::new(data, vec![2, 2, 3]).unwrap();
+    //         causal_softmax(&mut a, 1).unwrap();
+    //         assert_eq!(
+    //             simplify(a.data()),
+    //             // Values obtained through python
+    //             [
+    //                 0.2689, 0.7311, 0.0, 0.09, 0.2447, 0.6652, 0.2689, 0.7311, 0.0, 0.09, 0.2447,
+    //                 0.6652
+    //             ]
+    //         );
+    //     }
+    //
+    //     #[test]
+    //     fn simple_select() {
+    //         let a = Tensor::borrowed(&[1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+    //         let mut tensor = Tensor::zeros(vec![3, 2]);
+    //         select(&[1, 0, 0], &a, &mut tensor).unwrap();
+    //         assert_eq!(
+    //             simplify(tensor.data()),
+    //             // Values obtained through python
+    //             [3.0, 4.0, 1.0, 2.0, 1.0, 2.0]
+    //         );
+    //     }
+    //
+    //     #[test]
+    //     fn simple_normalize() {
+    //         let mut a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+    //         let epsilon = 1e-5;
+    //         normalize(&mut a, epsilon).unwrap();
+    //         assert_eq!(
+    //             simplify(a.data()),
+    //             // Values obtained through python
+    //             [-1.0, 1.0, -1.0, 1.0]
+    //         );
+    //     }
+}
