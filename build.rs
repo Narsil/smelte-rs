@@ -119,6 +119,9 @@ mod cuda {
             .map(|p| p.unwrap())
             .collect();
 
+        for path in &kernel_paths {
+            println!("cargo:rerun-if-changed={}", path.display());
+        }
         for path in &mut include_directories {
             println!("cargo:rerun-if-changed={}", path.display());
             // remove the filename from the path so it's just the directory
@@ -185,6 +188,11 @@ mod cuda {
                     "nvcc error while compiling {kernel_path:?}: {output:?}",
                 );
             }
+
+            println!(
+                "cargo:warning=Compiled {:?}",
+                kernel_paths,
+            );
 
             println!(
                 "cargo:warning=Compiled {:?} cuda kernels in {:?}",

@@ -1,4 +1,6 @@
 use crate::cpu::f32::{matmul, matmul_t, softmax, Tensor as F32Tensor};
+use crate::gpu::f32 as cuda_f32;
+use crate::gpu::f32::Tensor as F32CudaTensor;
 use crate::nn::layers::{Embedding, LayerNorm, Linear};
 use crate::traits::{Tensor, TensorOps};
 use crate::SmeltError;
@@ -128,6 +130,59 @@ where
     Ok(())
 }
 
+fn cuda_attention(
+    q_weights: &Linear<F32CudaTensor>,
+    k_weights: &Linear<F32CudaTensor>,
+    v_weights: &Linear<F32CudaTensor>,
+    ctx: &mut BertContext<F32CudaTensor>,
+) -> Result<(), SmeltError>
+{
+    q_weights.forward(&ctx.hidden_states, &mut ctx.hidden_states_copy)?;
+    todo!("permute heads");
+    // split_heads(&ctx.hidden_states_copy, &mut ctx.q_cache)?;
+
+    debug!("Q head splitted", ctx.q_cache);
+
+    k_weights.forward(&ctx.hidden_states, &mut ctx.hidden_states_copy)?;
+    // split_heads(&ctx.hidden_states_copy, &mut ctx.k_cache)?;
+
+    debug!("K head splitted", ctx.k_cache);
+
+    v_weights.forward(&ctx.hidden_states, &mut ctx.hidden_states_copy)?;
+    // split_heads(&ctx.hidden_states_copy, &mut ctx.v_cache)?;
+
+    debug!("V head splitted", ctx.v_cache);
+
+    cuda_f32::matmul_t(&ctx.q_cache, &ctx.k_cache, &mut ctx.qk).unwrap();
+
+    let num_heads = ctx.q_cache.shape()[0];
+    let sequence_length = ctx.q_cache.shape()[1];
+    let head_dim = ctx.q_cache.shape()[2];
+    let hidden_dim = head_dim * num_heads;
+    let scale = (head_dim as f32).sqrt();
+    cuda_f32::mul_scalar(&mut ctx.qk, 1.0 / scale);
+
+    cuda_f32::softmax(&mut ctx.qk).unwrap();
+    debug!("attention_probs", ctx.qk);
+    cuda_f32::matmul(&ctx.qk, &ctx.v_cache, &mut ctx.qkv).unwrap();
+    debug!("qkv", ctx.qkv);
+
+    todo!("repermute");
+    // let new_out = &mut ctx.hidden_states_attn_output.data_mut();
+    // (0..num_heads).for_each(|i| {
+    //     (0..sequence_length).for_each(|j| {
+    //         (0..head_dim).for_each(|k| {
+    //             let in_index = i * sequence_length * head_dim + j * head_dim + k;
+    //             let out_index = j * hidden_dim + i * head_dim + k;
+    //             new_out[out_index] = (ctx.qkv).data()[in_index];
+    //         });
+    //     });
+    // });
+    // debug!("qkv (reshaed)", ctx.hidden_states_attn_output);
+
+    Ok(())
+}
+
 /// TODO
 pub trait TensorAttention<T: Tensor> {
     /// TODO
@@ -150,23 +205,29 @@ impl<'a> TensorAttention<F32Tensor<'a>> for F32Tensor<'a> {
         Ok(())
     }
 }
-
-/// TODO
-pub trait Debug<T: Tensor> {
-    /// TODO
-    fn data(&self) -> &[f32];
-}
-
-impl<'a> Debug<F32Tensor<'a>> for F32Tensor<'a> {
-    fn data(&self) -> &[f32] {
-        self.data()
+impl TensorAttention<F32CudaTensor> for F32CudaTensor {
+    fn attention(
+        query: &Linear<F32CudaTensor>,
+        key: &Linear<F32CudaTensor>,
+        value: &Linear<F32CudaTensor>,
+        ctx: &mut BertContext<F32CudaTensor>,
+    ) -> Result<(), SmeltError> {
+        cuda_attention(query, key, value, ctx)?;
+        Ok(())
     }
 }
 
 /// TODO
-pub trait BertOps<T: Tensor>: TensorOps<T> + TensorAttention<T> + Debug<T> {}
+pub trait Reshape<T: Tensor> {
+    /// TODO
+    fn data(&self) -> &[f32];
+}
+
+/// TODO
+pub trait BertOps<T: Tensor>: TensorOps<T> + TensorAttention<T> {}
 
 impl<'a> BertOps<F32Tensor<'a>> for F32Tensor<'a> {}
+impl BertOps<F32CudaTensor> for F32CudaTensor {}
 
 /// TODO
 #[derive(Clone)]
