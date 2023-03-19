@@ -38,12 +38,16 @@ pub trait TensorMatmulT<T> {
 pub trait TensorAdd<T> {
     /// TODO
     fn add(a: &T, b: &mut T) -> Result<(), SmeltError>;
+    /// TODO
+    fn broadcast_add(a: &T, b: &mut T) -> Result<(), SmeltError>;
 }
 
 /// TODO
 pub trait TensorMul<T> {
     /// TODO
     fn mul(a: &T, b: &mut T) -> Result<(), SmeltError>;
+    /// TODO
+    fn broadcast_mul(a: &T, b: &mut T) -> Result<(), SmeltError>;
 }
 
 /// TODO
