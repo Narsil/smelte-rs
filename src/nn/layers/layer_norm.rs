@@ -35,7 +35,7 @@ mod tests {
     #[test]
     fn test_layer_norm() {
         let mut zeros = Tensor::zeros(vec![3, 2]);
-        let weights = Tensor::zeros(vec![3, 2]);
+        let weights = Tensor::zeros(vec![2]);
         let bias = Tensor::zeros(vec![2]);
 
         let linear = LayerNorm::new(weights, bias, 1e-5);
