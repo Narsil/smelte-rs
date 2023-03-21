@@ -231,7 +231,6 @@ pub fn add(a: &Tensor, b: &mut Tensor) -> Result<(), SmeltError> {
     }
 
     let numel = a.data().len();
-
     let fwd_fn = dev.get_func(module_name, module_name).unwrap();
     let cfg = LaunchConfig::for_num_elems(numel as u32);
     let params = (numel, a.data(), b.data_mut());
@@ -352,6 +351,7 @@ const NORMALIZE_PTX: &str = include_str!(concat!(env!("OUT_DIR"), "/normalize.pt
 /// avoid allocation.
 pub fn normalize(x: &mut Tensor, epsilon: f32) -> Result<(), SmeltError> {
     let dim = x.shape().len();
+    let numel: usize = x.shape()[..dim - 1].iter().product();
     let size = x.shape()[dim - 1];
     let dev = x.device();
 
@@ -361,7 +361,6 @@ pub fn normalize(x: &mut Tensor, epsilon: f32) -> Result<(), SmeltError> {
             .load_ptx(NORMALIZE_PTX.into(), module_name, &[module_name])?;
     }
 
-    let numel = dim;
     let fwd_fn = dev.get_func(module_name, module_name).unwrap();
     let cfg = LaunchConfig::for_num_elems(numel as u32);
     let params = (numel, x.data_mut(), size, epsilon);
@@ -484,8 +483,8 @@ mod tests {
     fn simple_matmul() {
         let device_id = 0;
         let data = vec![1.0, 2.0, 3.0, 4.0];
-        let a = Tensor::from_cpu(data.clone(), vec![2, 2], device_id).unwrap();
-        let b = Tensor::from_cpu(data, vec![2, 2], device_id).unwrap();
+        let a = Tensor::from_cpu(&data, vec![2, 2], device_id).unwrap();
+        let b = Tensor::from_cpu(&data, vec![2, 2], device_id).unwrap();
         let mut c = Tensor::zeros(vec![2, 2], device_id).unwrap();
 
         matmul(&a, &b, &mut c).unwrap();
@@ -494,16 +493,16 @@ mod tests {
         assert_eq!(c.cpu_data().unwrap(), &[7.0, 10.0, 15.0, 22.0]);
 
         let data = vec![1.0, 2.0, 3.0];
-        let a = Tensor::from_cpu(data, vec![3, 1], device_id).unwrap();
-        let b = Tensor::from_cpu(vec![3.0, 4.0], vec![1, 2], device_id).unwrap();
+        let a = Tensor::from_cpu(&data, vec![3, 1], device_id).unwrap();
+        let b = Tensor::from_cpu(&vec![3.0, 4.0], vec![1, 2], device_id).unwrap();
         let mut c = Tensor::zeros(vec![3, 2], device_id).unwrap();
         matmul(&a, &b, &mut c).unwrap();
         assert_eq!(c.cpu_data().unwrap(), &[3.0, 4.0, 6.0, 8.0, 9.0, 12.0]);
 
         let data: Vec<_> = (0..6).map(|i| i as f32).collect();
-        let a = Tensor::from_cpu(data, vec![2, 3], device_id).unwrap();
+        let a = Tensor::from_cpu(&data, vec![2, 3], device_id).unwrap();
         let data: Vec<_> = (0..12).map(|i| (i + 2) as f32).collect();
-        let b = Tensor::from_cpu(data, vec![3, 4], device_id).unwrap();
+        let b = Tensor::from_cpu(&data, vec![3, 4], device_id).unwrap();
         let mut c = Tensor::zeros(vec![2, 4], device_id).unwrap();
         matmul(&a, &b, &mut c).unwrap();
         assert_eq!(
@@ -512,9 +511,9 @@ mod tests {
         );
 
         let data: Vec<_> = (0..12).map(|i| i as f32).collect();
-        let a = Tensor::from_cpu(data, vec![2, 2, 3], device_id).unwrap();
+        let a = Tensor::from_cpu(&data, vec![2, 2, 3], device_id).unwrap();
         let data: Vec<_> = (0..24).map(|i| (i + 2) as f32).collect();
-        let b = Tensor::from_cpu(data, vec![2, 3, 4], device_id).unwrap();
+        let b = Tensor::from_cpu(&data, vec![2, 3, 4], device_id).unwrap();
         let mut c: Tensor = Tensor::zeros(vec![2, 2, 4], device_id).unwrap();
         matmul(&a, &b, &mut c).unwrap();
         assert_eq!(
@@ -529,24 +528,24 @@ mod tests {
     #[test]
     fn simple_matmul_t() {
         let device_id = 0;
-        let a = Tensor::from_cpu(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], device_id).unwrap();
+        let a = Tensor::from_cpu(&vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], device_id).unwrap();
         // A.T
-        let b = Tensor::from_cpu(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2], device_id).unwrap();
+        let b = Tensor::from_cpu(&vec![1.0, 3.0, 2.0, 4.0], vec![2, 2], device_id).unwrap();
         let mut c = Tensor::zeros(vec![2, 2], device_id).unwrap();
 
         matmul_t(&a, &b, &mut c).unwrap();
         assert_eq!(c.cpu_data().unwrap(), &[7.0, 10.0, 15.0, 22.0]);
 
-        let a = Tensor::from_cpu(vec![1.0, 2.0], vec![2, 1], device_id).unwrap();
-        let b = Tensor::from_cpu(vec![3.0, 4.0], vec![2, 1], device_id).unwrap();
+        let a = Tensor::from_cpu(&vec![1.0, 2.0], vec![2, 1], device_id).unwrap();
+        let b = Tensor::from_cpu(&vec![3.0, 4.0], vec![2, 1], device_id).unwrap();
         let mut c = Tensor::zeros(vec![2, 2], device_id).unwrap();
         matmul_t(&a, &b, &mut c).unwrap();
         assert_eq!(c.cpu_data().unwrap(), &[3.0, 4.0, 6.0, 8.0]);
 
         let data: Vec<_> = (0..6).map(|i| i as f32).collect();
-        let a = Tensor::from_cpu(data, vec![2, 3], device_id).unwrap();
+        let a = Tensor::from_cpu(&data, vec![2, 3], device_id).unwrap();
         let data: Vec<_> = (0..12).map(|i| (i + 2) as f32).collect();
-        let b = Tensor::from_cpu(data, vec![4, 3], device_id).unwrap();
+        let b = Tensor::from_cpu(&data, vec![4, 3], device_id).unwrap();
         let mut c = Tensor::zeros(vec![2, 4], device_id).unwrap();
         matmul_t(&a, &b, &mut c).unwrap();
         assert_eq!(
@@ -555,9 +554,9 @@ mod tests {
         );
 
         let data: Vec<_> = (0..12).map(|i| i as f32).collect();
-        let a = Tensor::from_cpu(data, vec![2, 2, 3], device_id).unwrap();
+        let a = Tensor::from_cpu(&data, vec![2, 2, 3], device_id).unwrap();
         let data: Vec<_> = (0..24).map(|i| (i + 2) as f32).collect();
-        let b = Tensor::from_cpu(data, vec![2, 4, 3], device_id).unwrap();
+        let b = Tensor::from_cpu(&data, vec![2, 4, 3], device_id).unwrap();
         let mut c = Tensor::zeros(vec![2, 2, 4], device_id).unwrap();
         matmul_t(&a, &b, &mut c).unwrap();
         assert_eq!(
@@ -571,8 +570,8 @@ mod tests {
     
     #[test]
     fn simple_add() {
-        let a = Tensor::from_cpu(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], 0).unwrap();
-        let mut b = Tensor::from_cpu(vec![1.0, 1.0, 1.0, 1.0], vec![2, 2], 0).unwrap();
+        let a = Tensor::from_cpu(&vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], 0).unwrap();
+        let mut b = Tensor::from_cpu(&vec![1.0, 1.0, 1.0, 1.0], vec![2, 2], 0).unwrap();
         add(&a, &mut b).unwrap();
         assert_eq!(
             b.cpu_data().unwrap(),
@@ -583,8 +582,8 @@ mod tests {
 
     #[test]
     fn simple_broadcast_add() {
-        let a = Tensor::from_cpu(vec![1.0, 2.0], vec![2], 0).unwrap();
-        let mut b = Tensor::from_cpu(vec![1.0, 1.0, 1.0, 1.0, 1.0, 1.0], vec![3, 2], 0).unwrap();
+        let a = Tensor::from_cpu(&vec![1.0, 2.0], vec![2], 0).unwrap();
+        let mut b = Tensor::from_cpu(&vec![1.0, 1.0, 1.0, 1.0, 1.0, 1.0], vec![3, 2], 0).unwrap();
         broadcast_add(&a, &mut b).unwrap();
         assert_eq!(
             b.cpu_data().unwrap(),
@@ -595,8 +594,8 @@ mod tests {
 
     #[test]
     fn simple_mul() {
-        let a = Tensor::from_cpu(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], 0).unwrap();
-        let mut b = Tensor::from_cpu(vec![2.0, 2.0, 3.0, 3.0], vec![2, 2], 0).unwrap();
+        let a = Tensor::from_cpu(&vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], 0).unwrap();
+        let mut b = Tensor::from_cpu(&vec![2.0, 2.0, 3.0, 3.0], vec![2, 2], 0).unwrap();
         mul(&a, &mut b).unwrap();
         assert_eq!(
             b.cpu_data().unwrap(),
@@ -608,7 +607,7 @@ mod tests {
     
     #[test]
     fn simple_softmax() {
-        let mut a = Tensor::from_cpu(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], 0).unwrap();
+        let mut a = Tensor::from_cpu(&vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], 0).unwrap();
         softmax(&mut a).unwrap();
         assert_eq!(
             simplify(&a.cpu_data().unwrap()),
@@ -619,7 +618,7 @@ mod tests {
     
     #[test]
     fn simple_causal_softmax() {
-        let mut a = Tensor::from_cpu(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], 0).unwrap();
+        let mut a = Tensor::from_cpu(&vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], 0).unwrap();
         // Large enough for the second test
         causal_softmax(&mut a, 0).unwrap();
         assert_eq!(
@@ -628,7 +627,7 @@ mod tests {
             [1.0000, 0.0000, 0.2689, 0.7311]
         );
     
-        let mut a = Tensor::from_cpu(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], 0).unwrap();
+        let mut a = Tensor::from_cpu(&vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], 0).unwrap();
         causal_softmax(&mut a, 1).unwrap();
         assert_eq!(
             simplify(&a.cpu_data().unwrap()),
@@ -637,7 +636,7 @@ mod tests {
         );
     
         let data: Vec<_> = (0..12).map(|i| (i + 1) as f32).collect();
-        let mut a = Tensor::from_cpu(data, vec![3, 2, 2], 0).unwrap();
+        let mut a = Tensor::from_cpu(&data, vec![3, 2, 2], 0).unwrap();
         causal_softmax(&mut a, 0).unwrap();
         assert_eq!(
             simplify(&a.cpu_data().unwrap()),
@@ -649,7 +648,7 @@ mod tests {
         );
     
         let data: Vec<_> = (0..12).map(|i| (i + 1) as f32).collect();
-        let mut a = Tensor::from_cpu(data, vec![2, 2, 3], 0).unwrap();
+        let mut a = Tensor::from_cpu(&data, vec![2, 2, 3], 0).unwrap();
         causal_softmax(&mut a, 1).unwrap();
         assert_eq!(
             simplify(&a.cpu_data().unwrap()),
@@ -663,7 +662,7 @@ mod tests {
     
     #[test]
     fn simple_select() {
-        let a = Tensor::from_cpu(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], 0).unwrap();
+        let a = Tensor::from_cpu(&vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], 0).unwrap();
         let mut tensor = Tensor::zeros(vec![3, 2], 0).unwrap();
         select(&[1, 0, 0], &a, &mut tensor).unwrap();
         assert_eq!(
@@ -675,7 +674,7 @@ mod tests {
 
     #[test]
     fn simple_normalize() {
-        let mut a = Tensor::from_cpu(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], 0).unwrap();
+        let mut a = Tensor::from_cpu(&vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], 0).unwrap();
         let epsilon = 1e-5;
         normalize(&mut a, epsilon).unwrap();
         assert_eq!(
@@ -683,5 +682,15 @@ mod tests {
             // Values obtained through python
             [-1.0, 1.0, -1.0, 1.0]
         );
+
+        // TODO Figure out how torch does layernorm to make sure this works.
+        // let mut a = Tensor::from_cpu(&[-0.8570, -1.4722, -1.7398, -0.5307, -0.4816,  0.2071], vec![2, 3], 0).unwrap();
+        // let epsilon = 1e-5;
+        // normalize(&mut a, epsilon).unwrap();
+        // assert_eq!(
+        //     simplify(&a.cpu_data().unwrap()),
+        //     // Values obtained through python
+        //     [ 1.1031, -0.2559, -0.8472, -0.6359, -0.5167,  1.1526]
+        // );
     }
 }

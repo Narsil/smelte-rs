@@ -214,7 +214,6 @@ pub fn broadcast_add(a: &Tensor, b: &mut Tensor) -> Result<(), SmeltError> {
             .for_each(|(left, right)| *right += left);
     });
     Ok(())
-
 }
 
 /// tensor elementwise multiplication. b += a.
@@ -249,7 +248,6 @@ pub fn broadcast_mul(a: &Tensor, b: &mut Tensor) -> Result<(), SmeltError> {
             .for_each(|(left, right)| *right *= left);
     });
     Ok(())
-
 }
 
 /// Basic operation for the layernorm.
@@ -393,10 +391,7 @@ mod tests {
         let a = Tensor::new(vec![1.0, 2.0], vec![2]).unwrap();
         let mut b = Tensor::new(vec![1.0, 1.0, 1.0, 1.0, 1.0, 1.0], vec![3, 2]).unwrap();
         broadcast_add(&a, &mut b).unwrap();
-        assert_eq!(
-            b.data(),
-            [2.0, 3.0, 2.0, 3.0, 2.0, 3.0]
-        );
+        assert_eq!(b.data(), [2.0, 3.0, 2.0, 3.0, 2.0, 3.0]);
     }
 
     #[test]
@@ -549,5 +544,15 @@ mod tests {
             // Values obtained through python
             [-1.0, 1.0, -1.0, 1.0]
         );
+
+        // TODO Figure out how torch does layernorm to make sure this works.
+        // let mut a = Tensor::new(vec![-0.8570, -1.4722, -1.7398, -0.5307, -0.4816,  0.2071], vec![2, 3]).unwrap();
+        // let epsilon = 1e-5;
+        // normalize(&mut a, epsilon).unwrap();
+        // assert_eq!(
+        //     simplify(a.data()),
+        //     // Values obtained through python
+        //     [ 1.1031, -0.2559, -0.8472, -0.6359, -0.5167,  1.1526]
+        // );
     }
 }

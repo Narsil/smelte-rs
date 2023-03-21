@@ -62,11 +62,7 @@ impl Tensor {
     }
 
     /// Creates a tensor from a cpu [Vec].
-    pub fn from_cpu(
-        data: Vec<f32>,
-        shape: Vec<usize>,
-        device_id: usize,
-    ) -> Result<Self, SmeltError> {
+    pub fn from_cpu(data: &[f32], shape: Vec<usize>, device_id: usize) -> Result<Self, SmeltError> {
         let device = CudaDevice::new(device_id)?;
         if data.len() != shape.iter().product::<usize>() {
             return Err(SmeltError::InvalidBuffer {
@@ -74,7 +70,7 @@ impl Tensor {
                 shape,
             });
         }
-        let data = device.htod_copy(data)?;
+        let data = device.htod_sync_copy(data)?;
         Ok(Self {
             device,
             device_id,
@@ -88,37 +84,4 @@ impl Tensor {
         let cpu_data = self.device.dtoh_sync_copy(&self.data)?;
         Ok(cpu_data)
     }
-
-    // /// Creates a new borrowed tensor with given shape. Can fail if data doesn't match the shape
-    // /// ```
-    // /// use smelte-rs::cpu::f32::Tensor;
-    // ///
-    // /// let data = [1.0, 2.0, 3.0, 4.0];
-    // /// let tensor = Tensor::borrowed(&data, vec![2, 2]).unwrap();
-    // /// ```
-    // pub fn borrowed(data: &'data [f32], shape: Vec<usize>) -> Result<Self, TensorError> {
-    //     let cow: Cow<'data, [f32]> = data.into();
-    //     Self::new(cow, shape)
-    // }
-
-    // /// Creates a new tensor with given shape. Can fail if data doesn't match the shape
-    // /// ```
-    // /// use smelte-rs::cpu::f32::Tensor;
-    // ///
-    // /// let data = vec![1.0, 2.0, 3.0, 4.0];
-    // /// let tensor = Tensor::new(data, vec![2, 2]).unwrap();
-    // /// ```
-    // pub fn new<T>(data: T, shape: Vec<usize>) -> Result<Self, TensorError>
-    // where
-    //     T: Into<Cow<'data, [f32]>>,
-    // {
-    //     let data = data.into();
-    //     if data.len() != shape.iter().product::<usize>() {
-    //         return Err(TensorError::InvalidBuffer {
-    //             buffer_size: data.len(),
-    //             shape,
-    //         });
-    //     }
-    //     Ok(Self { shape, data })
-    // }
 }
