@@ -563,13 +563,15 @@ impl<T: Tensor + BertOps<T>> BertPooler<T> {
 pub struct BertClassifier<T: Tensor + BertOps<T>> {
     bert: Bert<T>,
     pooler: BertPooler<T>,
-    classifier: Linear<T>,
+    /// NO
+    pub classifier: Linear<T>,
     num_heads: usize,
 }
 
 impl<T: Tensor + BertOps<T> + TensorAttention<T>> BertClassifier<T> {
     /// TODO
     pub fn new(bert: Bert<T>, pooler: BertPooler<T>, classifier: Linear<T>) -> Self {
+
         Self {
             bert,
             pooler,

@@ -6,7 +6,7 @@ mod gpu {
         SafeTensors,
     };
     use serde::Deserialize;
-    use smelte_rs::gpu::f32::Tensor;
+    use smelte_rs::gpu::f32::{Tensor, device};
     use smelte_rs::nn::layers::{Embedding, LayerNorm, Linear};
     use smelte_rs::nn::models::bert::{
         Bert, BertAttention, BertClassifier, BertEmbeddings, BertEncoder, BertLayer, BertPooler,
@@ -60,7 +60,7 @@ mod gpu {
     fn to_tensor<'data>(view: TensorView<'data>) -> Result<Tensor, SmeltError> {
         let shape = view.shape().to_vec();
         let data = to_f32(view);
-        Tensor::from_cpu(&data, shape, 0)
+        Tensor::from_cpu(&data, shape, device(0))
     }
 
     pub fn to_f32<'data>(view: TensorView<'data>) -> Cow<'data, [f32]> {
@@ -120,7 +120,6 @@ mod gpu {
             Self::new(bert, pooler, classifier)
         }
     }
-
     impl<'a> FromSafetensors<'a> for BertPooler<Tensor> {
         fn from_tensors(tensors: &'a SafeTensors<'a>) -> Self
         where
@@ -261,6 +260,8 @@ mod gpu {
     pub fn run() -> Result<(), BertError> {
         let start = std::time::Instant::now();
         let args: Vec<String> = std::env::args().collect();
+        let default_string = 
+                "Stocks rallied and the British pound gained.".to_string();
         let (n, string) = if args.len() > 1 {
             let mut string = "".to_string();
             let mut n = 1;
@@ -272,20 +273,19 @@ mod gpu {
                 } else if args[i] == "-h" {
                     println!(
                     "Use `-n 3` to run the prompt n times, the rest is interpreted as the prompt."
-                );
-                return Ok(());
-            } else {
-                string.push_str(&args[i]);
+                    );
+                    return Ok(());
+                } else {
+                    string.push_str(&args[i]);
+                }
+                i += 1;
             }
-            i += 1;
-        }
-        (n, string)
-    } else {
-        (
-            1,
-            "Stocks rallied and the British pound gained.".to_string(),
-        )
-    };
+            (n, if string.is_empty(){default_string} else{string})
+        } else {
+            (
+                1, default_string
+            )
+        };
 
         let model_id = "Narsil/finbert";
 
@@ -331,6 +331,8 @@ mod gpu {
 
         let mut bert = BertClassifier::from_tensors(&tensors);
         bert.set_num_heads(config.num_attention_heads);
+
+        let device = bert.classifier.weight().device();
         println!("Loaded {:?}", start.elapsed());
 
         let encoded = tokenizer.encode(string.clone(), false).unwrap();

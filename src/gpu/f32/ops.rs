@@ -8,6 +8,8 @@ use cudarc::driver::DriverError;
 use cudarc::driver::LaunchConfig;
 use cudarc::driver::DeviceSlice;
 use cudarc::driver::LaunchAsync;
+use cudarc::driver::CudaDevice;
+use std::sync::Arc;
 
 /// All potential errors linked specifically to cuda.
 #[derive(Debug, Clone)]
@@ -159,7 +161,7 @@ fn g_matmul<'a, const TRANSPOSE: bool>(
     let b_skip: usize = n * k;
     let c_skip: usize = m * n;
 
-    let blas = CudaBlas::new(a.device())?;
+    let blas = a.blas();
 
     let (m, n, k) = (m as libc::c_int, n as libc::c_int, k as libc::c_int);
 
@@ -207,6 +209,7 @@ fn g_matmul<'a, const TRANSPOSE: bool>(
 }
 
 const ADD_PTX: &str = include_str!(concat!(env!("OUT_DIR"), "/add.ptx"));
+
 /// tensor elementwise addition. b += a.
 pub fn add(a: &Tensor, b: &mut Tensor) -> Result<(), SmeltError> {
     if a.shape() != b.shape() {
@@ -225,7 +228,7 @@ pub fn add(a: &Tensor, b: &mut Tensor) -> Result<(), SmeltError> {
     let dev = a.device();
 
     let module_name = "add_fwd_f32";
-     if !dev.has_func(module_name, module_name) {
+    if !dev.has_func(module_name, module_name) {
         dev
             .load_ptx(ADD_PTX.into(), module_name, &[module_name])?;
     }
@@ -258,7 +261,7 @@ pub fn broadcast_add(a: &Tensor, b: &mut Tensor) -> Result<(), SmeltError> {
     let dev = a.device();
 
     let module_name = "badd_fwd_f32";
-     if !dev.has_func(module_name, module_name) {
+    if !dev.has_func(module_name, module_name) {
         dev
             .load_ptx(ADD_PTX.into(), module_name, &[module_name])?;
     }
@@ -291,7 +294,7 @@ pub fn mul(a: &Tensor, b: &mut Tensor) -> Result<(), SmeltError> {
     let dev = a.device();
 
     let module_name = "mul_fwd_f32";
-     if !dev.has_func(module_name, module_name) {
+    if !dev.has_func(module_name, module_name) {
         dev
             .load_ptx(ADD_PTX.into(), module_name, &[module_name])?;
     }
@@ -327,7 +330,7 @@ pub fn broadcast_mul(a: &Tensor, b: &mut Tensor) -> Result<(), SmeltError> {
     let dev = a.device();
 
     let module_name = "bmul_fwd_f32";
-     if !dev.has_func(module_name, module_name) {
+    if !dev.has_func(module_name, module_name) {
         dev
             .load_ptx(ADD_PTX.into(), module_name, &[module_name])?;
     }
@@ -356,7 +359,7 @@ pub fn normalize(x: &mut Tensor, epsilon: f32) -> Result<(), SmeltError> {
     let dev = x.device();
 
     let module_name = "normalize_f32";
-     if !dev.has_func(module_name, module_name) {
+    if !dev.has_func(module_name, module_name) {
         dev
             .load_ptx(NORMALIZE_PTX.into(), module_name, &[module_name])?;
     }
