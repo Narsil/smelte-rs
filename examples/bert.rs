@@ -60,8 +60,8 @@ pub fn main() -> Result<(), BertError> {
                 return Ok(());
             } else {
                 string.push_str(&args[i]);
-                i += 1;
             }
+            i += 1;
         }
         (n, string)
     } else {
