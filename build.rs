@@ -189,10 +189,7 @@ mod cuda {
                 );
             }
 
-            println!(
-                "cargo:warning=Compiled {:?}",
-                kernel_paths,
-            );
+            println!("cargo:warning=Compiled {:?}", kernel_paths,);
 
             println!(
                 "cargo:warning=Compiled {:?} cuda kernels in {:?}",

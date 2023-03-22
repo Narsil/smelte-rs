@@ -1,14 +1,43 @@
 use crate::SmeltError;
 use cudarc::driver::{CudaDevice, CudaSlice, DriverError};
 use std::sync::Arc;
+use cudarc::cublas::safe::{CudaBlas};
+
+lazy_static::lazy_static!{
+     pub static ref DEVICE_0: Device = Device::new(0).unwrap();
+}
+
+/// TODO
+pub fn device(device_id: usize) -> Device{
+    (*DEVICE_0).clone()
+}
 
 /// Tensor, can own, or borrow the underlying tensor
 #[derive(Clone)]
 pub struct Tensor {
     shape: Vec<usize>,
+    device: Device,
+    data: CudaSlice<f32>,
+}
+
+#[derive(Clone)]
+pub struct Device{
     device: Arc<CudaDevice>,
     device_id: usize,
-    data: CudaSlice<f32>,
+    blas: Arc<CudaBlas>,
+}
+
+impl Device{
+    pub fn new(device_id: usize) -> Result<Self, SmeltError>{
+        let device = CudaDevice::new(device_id)?;
+        let blas = Arc::new(CudaBlas::new(device.clone())?);
+        Ok(Self{
+            device,
+            device_id,
+            blas
+        })
+    }
+
 }
 
 impl Tensor {
@@ -35,12 +64,17 @@ impl Tensor {
 
     /// The device of the device
     pub fn device(&self) -> Arc<CudaDevice> {
-        self.device.clone()
+        self.device.device.clone()
+    }
+
+    /// The CudaBlas handle
+    pub fn blas(&self) -> Arc<CudaBlas> {
+        self.device.blas.clone()
     }
 
     /// The device id
     pub fn device_id(&self) -> usize {
-        self.device_id
+        self.device.device_id
     }
 
     /// Creates a new nulled tensor with given shape
@@ -49,35 +83,27 @@ impl Tensor {
     ///
     /// let tensor = Tensor::zeros(vec![2, 2], 0).unwrap();
     /// ```
-    pub fn zeros(shape: Vec<usize>, device_id: usize) -> Result<Self, DriverError> {
+    pub fn zeros(shape: Vec<usize>, device: Device) -> Result<Self, DriverError> {
         let nelement: usize = shape.iter().product();
-        let device = CudaDevice::new(device_id)?;
-        let data: CudaSlice<f32> = device.alloc_zeros(nelement)?;
+        let data: CudaSlice<f32> = device.device.alloc_zeros(nelement)?;
         Ok(Self {
             shape,
             data,
             device,
-            device_id,
         })
     }
 
     /// Creates a tensor from a cpu [Vec].
-    pub fn from_cpu(
-        data: Vec<f32>,
-        shape: Vec<usize>,
-        device_id: usize,
-    ) -> Result<Self, SmeltError> {
-        let device = CudaDevice::new(device_id)?;
+    pub fn from_cpu(data: &[f32], shape: Vec<usize>, device: Device) -> Result<Self, SmeltError> {
         if data.len() != shape.iter().product::<usize>() {
             return Err(SmeltError::InvalidBuffer {
                 buffer_size: data.len(),
                 shape,
             });
         }
-        let data = device.htod_copy(data)?;
+        let data = device.device.htod_sync_copy(data)?;
         Ok(Self {
             device,
-            device_id,
             data,
             shape,
         })
@@ -85,40 +111,7 @@ impl Tensor {
 
     /// Returns a cpu vec containing copied data from the device.
     pub fn cpu_data(&self) -> Result<Vec<f32>, SmeltError> {
-        let cpu_data = self.device.dtoh_sync_copy(&self.data)?;
+        let cpu_data = self.device.device.dtoh_sync_copy(&self.data)?;
         Ok(cpu_data)
     }
-
-    // /// Creates a new borrowed tensor with given shape. Can fail if data doesn't match the shape
-    // /// ```
-    // /// use smelte-rs::cpu::f32::Tensor;
-    // ///
-    // /// let data = [1.0, 2.0, 3.0, 4.0];
-    // /// let tensor = Tensor::borrowed(&data, vec![2, 2]).unwrap();
-    // /// ```
-    // pub fn borrowed(data: &'data [f32], shape: Vec<usize>) -> Result<Self, TensorError> {
-    //     let cow: Cow<'data, [f32]> = data.into();
-    //     Self::new(cow, shape)
-    // }
-
-    // /// Creates a new tensor with given shape. Can fail if data doesn't match the shape
-    // /// ```
-    // /// use smelte-rs::cpu::f32::Tensor;
-    // ///
-    // /// let data = vec![1.0, 2.0, 3.0, 4.0];
-    // /// let tensor = Tensor::new(data, vec![2, 2]).unwrap();
-    // /// ```
-    // pub fn new<T>(data: T, shape: Vec<usize>) -> Result<Self, TensorError>
-    // where
-    //     T: Into<Cow<'data, [f32]>>,
-    // {
-    //     let data = data.into();
-    //     if data.len() != shape.iter().product::<usize>() {
-    //         return Err(TensorError::InvalidBuffer {
-    //             buffer_size: data.len(),
-    //             shape,
-    //         });
-    //     }
-    //     Ok(Self { shape, data })
-    // }
 }

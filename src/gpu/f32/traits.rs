@@ -1,10 +1,13 @@
 use super::ops;
-use super::tensor::Tensor;
+use super::tensor::{Tensor, DEVICE_0};
 use crate::traits::{
     Tensor as TensorTrait, TensorAdd, TensorGelu, TensorMatmul, TensorMatmulT, TensorMul,
     TensorNormalize, TensorOps, TensorSelect, TensorSoftmax, TensorTanh,
 };
 use crate::SmeltError;
+use std::sync::Arc;
+use cudarc::driver::{CudaDevice};
+
 
 impl<'a> TensorTrait for Tensor {
     fn shape(&self) -> &[usize] {
@@ -12,7 +15,7 @@ impl<'a> TensorTrait for Tensor {
     }
     fn zeros(shape: Vec<usize>) -> Self {
         // TODO
-        Self::zeros(shape, 0).unwrap()
+        Self::zeros(shape, (*DEVICE_0).clone()).unwrap()
     }
 }
 

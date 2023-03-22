@@ -8,3 +8,4 @@ mod traits;
 
 pub use ops::*;
 pub use tensor::Tensor;
+pub use tensor::device;
