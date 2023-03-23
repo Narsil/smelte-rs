@@ -1,14 +1,14 @@
 use crate::SmeltError;
+use cudarc::cublas::safe::CudaBlas;
 use cudarc::driver::{CudaDevice, CudaSlice, DriverError};
 use std::sync::Arc;
-use cudarc::cublas::safe::{CudaBlas};
 
-lazy_static::lazy_static!{
+lazy_static::lazy_static! {
      pub static ref DEVICE_0: Device = Device::new(0).unwrap();
 }
 
 /// TODO
-pub fn device(device_id: usize) -> Device{
+pub fn device(device_id: usize) -> Device {
     (*DEVICE_0).clone()
 }
 
@@ -21,23 +21,22 @@ pub struct Tensor {
 }
 
 #[derive(Clone)]
-pub struct Device{
+pub struct Device {
     device: Arc<CudaDevice>,
     device_id: usize,
     blas: Arc<CudaBlas>,
 }
 
-impl Device{
-    pub fn new(device_id: usize) -> Result<Self, SmeltError>{
+impl Device {
+    pub fn new(device_id: usize) -> Result<Self, SmeltError> {
         let device = CudaDevice::new(device_id)?;
         let blas = Arc::new(CudaBlas::new(device.clone())?);
-        Ok(Self{
+        Ok(Self {
             device,
             device_id,
-            blas
+            blas,
         })
     }
-
 }
 
 impl Tensor {

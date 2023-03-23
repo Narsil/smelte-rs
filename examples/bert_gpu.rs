@@ -6,7 +6,7 @@ mod gpu {
         SafeTensors,
     };
     use serde::Deserialize;
-    use smelte_rs::gpu::f32::{Tensor, device};
+    use smelte_rs::gpu::f32::{device, Tensor};
     use smelte_rs::nn::layers::{Embedding, LayerNorm, Linear};
     use smelte_rs::nn::models::bert::{
         Bert, BertAttention, BertClassifier, BertEmbeddings, BertEncoder, BertLayer, BertPooler,
@@ -260,8 +260,7 @@ mod gpu {
     pub fn run() -> Result<(), BertError> {
         let start = std::time::Instant::now();
         let args: Vec<String> = std::env::args().collect();
-        let default_string = 
-                "Stocks rallied and the British pound gained.".to_string();
+        let default_string = "Stocks rallied and the British pound gained.".to_string();
         let (n, string) = if args.len() > 1 {
             let mut string = "".to_string();
             let mut n = 1;
@@ -280,11 +279,16 @@ mod gpu {
                 }
                 i += 1;
             }
-            (n, if string.is_empty(){default_string} else{string})
-        } else {
             (
-                1, default_string
+                n,
+                if string.is_empty() {
+                    default_string
+                } else {
+                    string
+                },
             )
+        } else {
+            (1, default_string)
         };
 
         let model_id = "Narsil/finbert";
