@@ -39,6 +39,12 @@ jobs:
           command: build
           args: --verbose
 
+      - name: Check format
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --check
+
       - name: Lint with Clippy
         uses: actions-rs/cargo@v1
         with:
@@ -90,6 +96,12 @@ jobs:
         with:
           command: build
           args: --no-default-features --features matrixmultiply --verbose
+
+      - name: Check format
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --check
 
       - name: Lint with Clippy
         uses: actions-rs/cargo@v1
