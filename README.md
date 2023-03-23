@@ -24,10 +24,10 @@ curl https://huggingface.co/Narsil/finbert/resolve/main/tokenizer.json -o tokeni
 curl https://huggingface.co/Narsil/finbert/resolve/main/config.json -o config-Narsil-finbert.json -L
 
 # Linux
-cargo run --example bert --release --features intel-mkl -- "This is a test" -n 3
+cargo run --example bert --release --features intel-mkl -- -p "This is a test" -n 3
 
 # M1
-cargo run --example bert --release -- "This is a test" -n 3
+cargo run --example bert --release -- -p "This is a test" -n 3
 ```
 
 ## Why not use library X ?

@@ -18,6 +18,7 @@ mod gpu {
     use std::fs::File;
     use thiserror::Error;
     use tokenizers::Tokenizer;
+    use clap::Parser;
 
     #[derive(Debug, Error)]
     pub enum BertError {
@@ -297,39 +298,21 @@ mod gpu {
         }
     }
 
+    #[derive(Parser)]
+    struct Args {
+        /// Prompt to run
+        #[arg(short, long, default_value_t = String::from("Stocks rallied and the British pound gained"))]
+        prompt: String,
+        /// Number of times to run the prompt
+        #[arg(short, long, default_value_t = 1)]
+        number: u8,
+    }
+
     pub fn run() -> Result<(), BertError> {
         let start = std::time::Instant::now();
-        let args: Vec<String> = std::env::args().collect();
-        let default_string = "Stocks rallied and the British pound gained.".to_string();
-        let (n, string) = if args.len() > 1 {
-            let mut string = "".to_string();
-            let mut n = 1;
-            let mut i = 1;
-            while i < args.len() {
-                if args[i] == "-n" {
-                    i += 1;
-                    n = args[i].parse().unwrap();
-                } else if args[i] == "-h" {
-                    println!(
-                    "Use `-n 3` to run the prompt n times, the rest is interpreted as the prompt."
-                    );
-                    return Ok(());
-                } else {
-                    string.push_str(&args[i]);
-                }
-                i += 1;
-            }
-            (
-                n,
-                if string.is_empty() {
-                    default_string
-                } else {
-                    string
-                },
-            )
-        } else {
-            (1, default_string)
-        };
+        let args = Args::parse();
+        let string = args.prompt;
+        let n = args.number;
 
         let model_id = "Narsil/finbert";
 
