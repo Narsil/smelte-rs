@@ -4,11 +4,11 @@ use cudarc::cublas::result::CublasError;
 use cudarc::cublas::safe::{CudaBlas, GemmConfig, StridedBatchedConfig};
 use cudarc::cublas::sys::cublasOperation_t::{CUBLAS_OP_N as NoTr, CUBLAS_OP_T as Tr};
 use cudarc::cublas::Gemm;
-use cudarc::driver::DriverError;
-use cudarc::driver::LaunchConfig;
-use cudarc::driver::DeviceSlice;
-use cudarc::driver::LaunchAsync;
 use cudarc::driver::CudaDevice;
+use cudarc::driver::DeviceSlice;
+use cudarc::driver::DriverError;
+use cudarc::driver::LaunchAsync;
+use cudarc::driver::LaunchConfig;
 use std::sync::Arc;
 
 /// All potential errors linked specifically to cuda.
@@ -68,9 +68,12 @@ pub fn select(ids: &[usize], weights: &Tensor, out: &mut Tensor) -> Result<(), S
         let weight_offset = id * hidden_dim;
         let data_offset = i * hidden_dim;
 
-
-        let src = weights.data().slice(weight_offset..weight_offset + hidden_dim);
-        let mut dst = out.data_mut().slice_mut(data_offset..data_offset + hidden_dim);
+        let src = weights
+            .data()
+            .slice(weight_offset..weight_offset + hidden_dim);
+        let mut dst = out
+            .data_mut()
+            .slice_mut(data_offset..data_offset + hidden_dim);
         dev.dtod_copy(&src, &mut dst)?
     }
     Ok(())
@@ -229,8 +232,7 @@ pub fn add(a: &Tensor, b: &mut Tensor) -> Result<(), SmeltError> {
 
     let module_name = "add_fwd_f32";
     if !dev.has_func(module_name, module_name) {
-        dev
-            .load_ptx(ADD_PTX.into(), module_name, &[module_name])?;
+        dev.load_ptx(ADD_PTX.into(), module_name, &[module_name])?;
     }
 
     let numel = a.data().len();
@@ -262,8 +264,7 @@ pub fn broadcast_add(a: &Tensor, b: &mut Tensor) -> Result<(), SmeltError> {
 
     let module_name = "badd_fwd_f32";
     if !dev.has_func(module_name, module_name) {
-        dev
-            .load_ptx(ADD_PTX.into(), module_name, &[module_name])?;
+        dev.load_ptx(ADD_PTX.into(), module_name, &[module_name])?;
     }
 
     let numel = b.data().len();
@@ -295,8 +296,7 @@ pub fn mul(a: &Tensor, b: &mut Tensor) -> Result<(), SmeltError> {
 
     let module_name = "mul_fwd_f32";
     if !dev.has_func(module_name, module_name) {
-        dev
-            .load_ptx(ADD_PTX.into(), module_name, &[module_name])?;
+        dev.load_ptx(ADD_PTX.into(), module_name, &[module_name])?;
     }
 
     let numel = a.data().len();
@@ -309,8 +309,6 @@ pub fn mul(a: &Tensor, b: &mut Tensor) -> Result<(), SmeltError> {
     Ok(())
 }
 
-
- 
 /// broadcasted tensor elementwise multiplication. b *= a.
 pub fn broadcast_mul(a: &Tensor, b: &mut Tensor) -> Result<(), SmeltError> {
     if &b.shape()[1..] != a.shape() {
@@ -331,8 +329,7 @@ pub fn broadcast_mul(a: &Tensor, b: &mut Tensor) -> Result<(), SmeltError> {
 
     let module_name = "bmul_fwd_f32";
     if !dev.has_func(module_name, module_name) {
-        dev
-            .load_ptx(ADD_PTX.into(), module_name, &[module_name])?;
+        dev.load_ptx(ADD_PTX.into(), module_name, &[module_name])?;
     }
 
     let numel = b.data().len();
@@ -344,7 +341,6 @@ pub fn broadcast_mul(a: &Tensor, b: &mut Tensor) -> Result<(), SmeltError> {
 
     Ok(())
 }
-
 
 const NORMALIZE_PTX: &str = include_str!(concat!(env!("OUT_DIR"), "/normalize.ptx"));
 
@@ -360,8 +356,7 @@ pub fn normalize(x: &mut Tensor, epsilon: f32) -> Result<(), SmeltError> {
 
     let module_name = "normalize_f32";
     if !dev.has_func(module_name, module_name) {
-        dev
-            .load_ptx(NORMALIZE_PTX.into(), module_name, &[module_name])?;
+        dev.load_ptx(NORMALIZE_PTX.into(), module_name, &[module_name])?;
     }
 
     let fwd_fn = dev.get_func(module_name, module_name).unwrap();
@@ -371,7 +366,6 @@ pub fn normalize(x: &mut Tensor, epsilon: f32) -> Result<(), SmeltError> {
 
     Ok(())
 }
-
 
 const SOFTMAX_PTX: &str = include_str!(concat!(env!("OUT_DIR"), "/softmax.ptx"));
 
@@ -388,15 +382,10 @@ fn g_softmax<const CAUSAL: bool>(
     let dev = x.device();
 
     let module_name = "softmax_f32";
-     if !dev.has_func(module_name, module_name) {
-        dev
-            .load_ptx(SOFTMAX_PTX.into(), module_name, &[module_name])?;
+    if !dev.has_func(module_name, module_name) {
+        dev.load_ptx(SOFTMAX_PTX.into(), module_name, &[module_name])?;
     }
-    let past_sequence_length = if CAUSAL{
-        past_sequence_length
-    }else{
-        n
-    };
+    let past_sequence_length = if CAUSAL { past_sequence_length } else { n };
 
     let numel: usize = x.shape()[..dim - 1].iter().product();
     let fwd_fn = dev.get_func(module_name, module_name).unwrap();
@@ -425,9 +414,8 @@ const UNITARY_PTX: &str = include_str!(concat!(env!("OUT_DIR"), "/unitary.ptx"))
 pub fn tanh(x: &mut Tensor) -> Result<(), SmeltError> {
     let dev = x.device();
     let module_name = "tanh_f32";
-     if !dev.has_func(module_name, module_name) {
-        dev
-            .load_ptx(UNITARY_PTX.into(), module_name, &[module_name])?;
+    if !dev.has_func(module_name, module_name) {
+        dev.load_ptx(UNITARY_PTX.into(), module_name, &[module_name])?;
     }
     let numel: usize = x.shape().iter().product();
     let fwd_fn = dev.get_func(module_name, module_name).unwrap();
@@ -445,9 +433,8 @@ pub fn tanh(x: &mut Tensor) -> Result<(), SmeltError> {
 pub fn gelu(x: &mut Tensor) -> Result<(), SmeltError> {
     let module_name = "gelu_f32";
     let dev = x.device();
-     if !dev.has_func(module_name, module_name) {
-        dev
-            .load_ptx(UNITARY_PTX.into(), module_name, &[module_name])?;
+    if !dev.has_func(module_name, module_name) {
+        dev.load_ptx(UNITARY_PTX.into(), module_name, &[module_name])?;
     }
     let numel: usize = x.shape().iter().product();
     let fwd_fn = dev.get_func(module_name, module_name).unwrap();
@@ -455,7 +442,6 @@ pub fn gelu(x: &mut Tensor) -> Result<(), SmeltError> {
     let params = (numel, x.data_mut());
     unsafe { fwd_fn.launch(cfg, params) }?;
     Ok(())
-
 }
 
 /// TODO
@@ -463,9 +449,8 @@ pub fn gelu(x: &mut Tensor) -> Result<(), SmeltError> {
 pub fn mul_scalar(x: &mut Tensor, factor: f32) -> Result<(), SmeltError> {
     let dev = x.device();
     let module_name = "mul_scalar_f32";
-     if !dev.has_func(module_name, module_name) {
-        dev
-            .load_ptx(UNITARY_PTX.into(), module_name, &[module_name])?;
+    if !dev.has_func(module_name, module_name) {
+        dev.load_ptx(UNITARY_PTX.into(), module_name, &[module_name])?;
     }
     let numel: usize = x.shape().iter().product();
     let fwd_fn = dev.get_func(module_name, module_name).unwrap();
@@ -475,7 +460,6 @@ pub fn mul_scalar(x: &mut Tensor, factor: f32) -> Result<(), SmeltError> {
 
     Ok(())
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -570,7 +554,7 @@ mod tests {
             ]
         );
     }
-    
+
     #[test]
     fn simple_add() {
         let a = Tensor::from_cpu(&vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], 0).unwrap();
@@ -607,7 +591,6 @@ mod tests {
         );
     }
 
-    
     #[test]
     fn simple_softmax() {
         let mut a = Tensor::from_cpu(&vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], 0).unwrap();
@@ -618,7 +601,7 @@ mod tests {
             [0.2689, 0.7311, 0.2689, 0.7311]
         );
     }
-    
+
     #[test]
     fn simple_causal_softmax() {
         let mut a = Tensor::from_cpu(&vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], 0).unwrap();
@@ -629,7 +612,7 @@ mod tests {
             // Values obtained through python
             [1.0000, 0.0000, 0.2689, 0.7311]
         );
-    
+
         let mut a = Tensor::from_cpu(&vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], 0).unwrap();
         causal_softmax(&mut a, 1).unwrap();
         assert_eq!(
@@ -637,7 +620,7 @@ mod tests {
             // Values obtained through python
             [0.2689, 0.7311, 0.2689, 0.7311]
         );
-    
+
         let data: Vec<_> = (0..12).map(|i| (i + 1) as f32).collect();
         let mut a = Tensor::from_cpu(&data, vec![3, 2, 2], 0).unwrap();
         causal_softmax(&mut a, 0).unwrap();
@@ -649,7 +632,7 @@ mod tests {
                 0.2689, 0.7311
             ]
         );
-    
+
         let data: Vec<_> = (0..12).map(|i| (i + 1) as f32).collect();
         let mut a = Tensor::from_cpu(&data, vec![2, 2, 3], 0).unwrap();
         causal_softmax(&mut a, 1).unwrap();
@@ -662,7 +645,7 @@ mod tests {
             ]
         );
     }
-    
+
     #[test]
     fn simple_select() {
         let a = Tensor::from_cpu(&vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], 0).unwrap();

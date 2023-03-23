@@ -5,9 +5,8 @@ use crate::traits::{
     TensorNormalize, TensorOps, TensorSelect, TensorSoftmax, TensorTanh,
 };
 use crate::SmeltError;
+use cudarc::driver::CudaDevice;
 use std::sync::Arc;
-use cudarc::driver::{CudaDevice};
-
 
 impl<'a> TensorTrait for Tensor {
     fn shape(&self) -> &[usize] {
