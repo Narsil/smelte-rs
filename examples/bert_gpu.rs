@@ -1,5 +1,6 @@
 #[cfg(feature = "cuda")]
 mod gpu {
+    use clap::Parser;
     use memmap2::MmapOptions;
     use safetensors::{
         tensor::{Dtype, SafeTensorError, TensorView},
@@ -18,7 +19,6 @@ mod gpu {
     use std::fs::File;
     use thiserror::Error;
     use tokenizers::Tokenizer;
-    use clap::Parser;
 
     #[derive(Debug, Error)]
     pub enum BertError {
