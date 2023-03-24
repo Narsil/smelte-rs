@@ -218,7 +218,7 @@ fn main() -> Result<(), BuildError> {
         "dylib"
     };
 
-    #[cfg(not(feature = "matrixmultiply"))]
+    #[cfg(feature = "cblas")]
     println!("cargo:rustc-link-lib={link_type}=cblas");
 
     #[cfg(feature = "intel-mkl")]
