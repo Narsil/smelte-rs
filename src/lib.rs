@@ -97,9 +97,9 @@
 pub mod cpu;
 
 /// The various GPU implementations
-#[cfg(feature = "gpu")]
+#[cfg(feature = "cuda")]
 pub mod gpu;
-#[cfg(feature = "gpu")]
+#[cfg(feature = "cuda")]
 use gpu::f32::CudaError;
 
 /// The neural networks
@@ -159,7 +159,7 @@ pub enum SmeltError {
     },
 
     /// All errors of cuda handling
-    #[cfg(feature = "gpu")]
+    #[cfg(feature = "cuda")]
     Cuda(CudaError),
 }
 

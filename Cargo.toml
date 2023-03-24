@@ -23,11 +23,8 @@ keywords = [
 [dependencies]
 cblas-sys = { version = "0.1.4", default-features = false, optional = true }
 matrixmultiply = { version = "0.3.2", default-features = false, optional = true }
-half = {version = "2.2.1", features=["num-traits"], optional=true}
 libc = { version = "0.2", default-features = false }
-num-traits = { version = "0.2.15", optional=true}
 cudarc = { git = "https://github.com/Narsil/cudarc.git", optional = true, default-features=false, features=["driver", "cublas"] }
-lazy_static = "1.4.0"
 
 [dev-dependencies]
 serde = { version = "1.0.152", features = ["serde_derive"] }
@@ -44,9 +41,8 @@ glob = { version = "0.3.1", optional = true }
 default = []
 cblas = ["dep:cblas-sys"]
 intel-mkl = ["dep:cblas-sys"]
-f16 = ["dep:half", "dep:num-traits"]
 matrixmultiply = ["matrixmultiply/threading"]
-gpu = ["dep:cudarc", "dep:glob"]
+cuda = ["dep:cudarc", "dep:glob"]
 
 
 [[example]]
@@ -54,4 +50,4 @@ name = "bert"
 
 [[example]]
 name = "bert_gpu"
-required-features = ["gpu"]
+required-features = ["cuda"]

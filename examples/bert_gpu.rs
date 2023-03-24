@@ -1,4 +1,4 @@
-#[cfg(feature = "gpu")]
+#[cfg(feature = "cuda")]
 mod gpu {
     use memmap2::MmapOptions;
     use safetensors::{
@@ -6,7 +6,7 @@ mod gpu {
         SafeTensors,
     };
     use serde::Deserialize;
-    use smelte_rs::gpu::f32::{device, Tensor};
+    use smelte_rs::gpu::f32::{Device, Tensor};
     use smelte_rs::nn::layers::{Embedding, LayerNorm, Linear};
     use smelte_rs::nn::models::bert::{
         Bert, BertAttention, BertClassifier, BertEmbeddings, BertEncoder, BertLayer, BertPooler,
@@ -52,15 +52,15 @@ mod gpu {
     }
 
     pub trait FromSafetensors<'a> {
-        fn from_tensors(tensors: &'a SafeTensors<'a>) -> Self
+        fn from_tensors(tensors: &'a SafeTensors<'a>, device: &Device) -> Self
         where
             Self: Sized;
     }
 
-    fn to_tensor<'data>(view: TensorView<'data>) -> Result<Tensor, SmeltError> {
+    fn to_tensor<'data>(view: TensorView<'data>, device: &Device) -> Result<Tensor, SmeltError> {
         let shape = view.shape().to_vec();
         let data = to_f32(view);
-        Tensor::from_cpu(&data, shape, device(0))
+        Tensor::from_cpu(&data, shape, device)
     }
 
     pub fn to_f32<'data>(view: TensorView<'data>) -> Cow<'data, [f32]> {
@@ -83,28 +83,40 @@ mod gpu {
         }
     }
 
-    fn linear_from<'a>(weights: TensorView<'a>, bias: TensorView<'a>) -> Linear<Tensor> {
-        Linear::new(to_tensor(weights).unwrap(), to_tensor(bias).unwrap())
-    }
-
-    fn linear_from_prefix<'a>(prefix: &str, tensors: &'a SafeTensors<'a>) -> Linear<Tensor> {
-        linear_from(
-            tensors.tensor(&format!("{}.weight", prefix)).unwrap(),
-            tensors.tensor(&format!("{}.bias", prefix)).unwrap(),
+    fn linear_from<'a>(
+        weights: TensorView<'a>,
+        bias: TensorView<'a>,
+        device: &Device,
+    ) -> Linear<Tensor> {
+        Linear::new(
+            to_tensor(weights, device).unwrap(),
+            to_tensor(bias, device).unwrap(),
         )
     }
 
-    fn embedding_from<'a>(weights: TensorView<'a>) -> Embedding<Tensor> {
-        Embedding::new(to_tensor(weights).unwrap())
+    fn linear_from_prefix<'a>(
+        prefix: &str,
+        tensors: &'a SafeTensors<'a>,
+        device: &Device,
+    ) -> Linear<Tensor> {
+        linear_from(
+            tensors.tensor(&format!("{}.weight", prefix)).unwrap(),
+            tensors.tensor(&format!("{}.bias", prefix)).unwrap(),
+            device,
+        )
+    }
+
+    fn embedding_from<'a>(weights: TensorView<'a>, device: &Device) -> Embedding<Tensor> {
+        Embedding::new(to_tensor(weights, device).unwrap())
     }
 
     impl<'a> FromSafetensors<'a> for BertClassifier<Tensor> {
-        fn from_tensors(tensors: &'a SafeTensors<'a>) -> Self
+        fn from_tensors(tensors: &'a SafeTensors<'a>, device: &Device) -> Self
         where
             Self: Sized,
         {
-            let pooler = BertPooler::from_tensors(tensors);
-            let bert = Bert::from_tensors(tensors);
+            let pooler = BertPooler::from_tensors(tensors, device);
+            let bert = Bert::from_tensors(tensors, device);
             let (weight, bias) = if let (Ok(weight), Ok(bias)) = (
                 tensors.tensor("classifier.weight"),
                 tensors.tensor("classifier.bias"),
@@ -116,36 +128,37 @@ mod gpu {
                     tensors.tensor("cls.seq_relationship.bias").unwrap(),
                 )
             };
-            let classifier = linear_from(weight, bias);
+            let classifier = linear_from(weight, bias, device);
             Self::new(bert, pooler, classifier)
         }
     }
     impl<'a> FromSafetensors<'a> for BertPooler<Tensor> {
-        fn from_tensors(tensors: &'a SafeTensors<'a>) -> Self
+        fn from_tensors(tensors: &'a SafeTensors<'a>, device: &Device) -> Self
         where
             Self: Sized,
         {
             let pooler = linear_from(
                 tensors.tensor("bert.pooler.dense.weight").unwrap(),
                 tensors.tensor("bert.pooler.dense.bias").unwrap(),
+                device,
             );
             Self::new(pooler)
         }
     }
 
     impl<'a> FromSafetensors<'a> for Bert<Tensor> {
-        fn from_tensors(tensors: &'a SafeTensors<'a>) -> Self
+        fn from_tensors(tensors: &'a SafeTensors<'a>, device: &Device) -> Self
         where
             Self: Sized,
         {
-            let embeddings = BertEmbeddings::from_tensors(tensors);
-            let encoder = BertEncoder::from_tensors(tensors);
+            let embeddings = BertEmbeddings::from_tensors(tensors, device);
+            let encoder = BertEncoder::from_tensors(tensors, device);
             Bert::new(embeddings, encoder)
         }
     }
 
     impl<'a> FromSafetensors<'a> for BertEmbeddings<Tensor> {
-        fn from_tensors(tensors: &'a SafeTensors<'a>) -> Self
+        fn from_tensors(tensors: &'a SafeTensors<'a>, device: &Device) -> Self
         where
             Self: Sized,
         {
@@ -153,19 +166,22 @@ mod gpu {
                 tensors
                     .tensor("bert.embeddings.word_embeddings.weight")
                     .unwrap(),
+                device,
             );
             let position_embeddings = embedding_from(
                 tensors
                     .tensor("bert.embeddings.position_embeddings.weight")
                     .unwrap(),
+                device,
             );
             let type_embeddings = embedding_from(
                 tensors
                     .tensor("bert.embeddings.token_type_embeddings.weight")
                     .unwrap(),
+                device,
             );
 
-            let layer_norm = layer_norm_from_prefix("bert.embeddings.LayerNorm", &tensors);
+            let layer_norm = layer_norm_from_prefix("bert.embeddings.LayerNorm", &tensors, device);
             BertEmbeddings::new(
                 input_embeddings,
                 position_embeddings,
@@ -178,80 +194,104 @@ mod gpu {
     fn bert_layer_from_tensors<'a>(
         index: usize,
         tensors: &'a SafeTensors<'a>,
+        device: &Device,
     ) -> BertLayer<Tensor> {
-        let attention = bert_attention_from_tensors(index, tensors);
-        let mlp = bert_mlp_from_tensors(index, tensors);
+        let attention = bert_attention_from_tensors(index, tensors, device);
+        let mlp = bert_mlp_from_tensors(index, tensors, device);
         BertLayer::new(attention, mlp)
     }
     fn bert_attention_from_tensors<'a>(
         index: usize,
         tensors: &'a SafeTensors<'a>,
+        device: &Device,
     ) -> BertAttention<Tensor> {
         let query = linear_from_prefix(
             &format!("bert.encoder.layer.{index}.attention.self.query"),
             tensors,
+            device,
         );
         let key = linear_from_prefix(
             &format!("bert.encoder.layer.{index}.attention.self.key"),
             tensors,
+            device,
         );
         let value = linear_from_prefix(
             &format!("bert.encoder.layer.{index}.attention.self.value"),
             tensors,
+            device,
         );
         let output = linear_from_prefix(
             &format!("bert.encoder.layer.{index}.attention.output.dense"),
             tensors,
+            device,
         );
         let output_ln = layer_norm_from_prefix(
             &format!("bert.encoder.layer.{index}.attention.output.LayerNorm"),
             &tensors,
+            device,
         );
         BertAttention::new(query, key, value, output, output_ln)
     }
 
-    fn bert_mlp_from_tensors<'a>(index: usize, tensors: &'a SafeTensors<'a>) -> Mlp<Tensor> {
+    fn bert_mlp_from_tensors<'a>(
+        index: usize,
+        tensors: &'a SafeTensors<'a>,
+        device: &Device,
+    ) -> Mlp<Tensor> {
         let intermediate = linear_from_prefix(
             &format!("bert.encoder.layer.{index}.intermediate.dense"),
             tensors,
+            device,
         );
-        let output =
-            linear_from_prefix(&format!("bert.encoder.layer.{index}.output.dense"), tensors);
+        let output = linear_from_prefix(
+            &format!("bert.encoder.layer.{index}.output.dense"),
+            tensors,
+            device,
+        );
         let output_ln = layer_norm_from_prefix(
             &format!("bert.encoder.layer.{index}.output.LayerNorm"),
             &tensors,
+            device,
         );
         Mlp::new(intermediate, output, output_ln)
     }
 
-    fn layer_norm_from_prefix<'a>(prefix: &str, tensors: &'a SafeTensors<'a>) -> LayerNorm<Tensor> {
+    fn layer_norm_from_prefix<'a>(
+        prefix: &str,
+        tensors: &'a SafeTensors<'a>,
+        device: &Device,
+    ) -> LayerNorm<Tensor> {
         let epsilon = 1e-5;
         if let (Ok(weight), Ok(bias)) = (
             tensors.tensor(&format!("{}.weight", prefix)),
             tensors.tensor(&format!("{}.bias", prefix)),
         ) {
             LayerNorm::new(
-                to_tensor(weight).unwrap(),
-                to_tensor(bias).unwrap(),
+                to_tensor(weight, device).unwrap(),
+                to_tensor(bias, device).unwrap(),
                 epsilon,
             )
         } else {
             LayerNorm::new(
-                to_tensor(tensors.tensor(&format!("{}.gamma", prefix)).unwrap()).unwrap(),
-                to_tensor(tensors.tensor(&format!("{}.beta", prefix)).unwrap()).unwrap(),
+                to_tensor(
+                    tensors.tensor(&format!("{}.gamma", prefix)).unwrap(),
+                    device,
+                )
+                .unwrap(),
+                to_tensor(tensors.tensor(&format!("{}.beta", prefix)).unwrap(), device).unwrap(),
                 epsilon,
             )
         }
     }
 
     impl<'a> FromSafetensors<'a> for BertEncoder<Tensor> {
-        fn from_tensors(tensors: &'a SafeTensors<'a>) -> Self
+        fn from_tensors(tensors: &'a SafeTensors<'a>, device: &Device) -> Self
         where
             Self: Sized,
         {
             // TODO ! Count heads from tensors present
             let layers: Vec<_> = (0..12)
-                .map(|i| bert_layer_from_tensors(i, tensors))
+                .map(|i| bert_layer_from_tensors(i, tensors, device))
                 .collect();
             Self::new(layers)
         }
@@ -333,7 +373,9 @@ mod gpu {
         let config_str: String = std::fs::read_to_string(filename).expect("Could not read config");
         let config: Config = serde_json::from_str(&config_str).expect("Could not parse Config");
 
-        let mut bert = BertClassifier::from_tensors(&tensors);
+        let device = Device::new(0).unwrap();
+
+        let mut bert = BertClassifier::from_tensors(&tensors, &device);
         bert.set_num_heads(config.num_attention_heads);
 
         let device = bert.classifier.weight().device();
@@ -370,8 +412,8 @@ mod gpu {
 }
 
 fn main() {
-    #[cfg(not(feature = "gpu"))]
-    unreachable!("Requires gpu feature");
-    #[cfg(feature = "gpu")]
+    #[cfg(not(feature = "cuda"))]
+    unreachable!("Requires cuda feature");
+    #[cfg(feature = "cuda")]
     gpu::run().unwrap()
 }

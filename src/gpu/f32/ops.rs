@@ -58,7 +58,7 @@ pub fn select(ids: &[usize], weights: &Tensor, out: &mut Tensor) -> Result<(), S
         }));
     }
 
-    let dev = weights.device();
+    let dev = weights.cuda();
 
     for (i, id) in ids.iter().enumerate() {
         let id = *id;
@@ -157,7 +157,7 @@ fn g_matmul<'a, const TRANSPOSE: bool>(
 
     // TODO Maybe Zero out c
     // c.data_mut().iter_mut().for_each(|v| *v = 0.0);
-    c.device().memset_zeros(c.data_mut())?;
+    c.cuda().memset_zeros(c.data_mut())?;
 
     let batching: usize = a.shape()[..dim - 2].iter().product();
     let a_skip: usize = m * k;
@@ -228,7 +228,7 @@ pub fn add(a: &Tensor, b: &mut Tensor) -> Result<(), SmeltError> {
         }));
     }
 
-    let dev = a.device();
+    let dev = a.cuda();
 
     let module_name = "add_fwd_f32";
     if !dev.has_func(module_name, module_name) {
@@ -260,7 +260,7 @@ pub fn broadcast_add(a: &Tensor, b: &mut Tensor) -> Result<(), SmeltError> {
         }));
     }
 
-    let dev = a.device();
+    let dev = a.cuda();
 
     let module_name = "badd_fwd_f32";
     if !dev.has_func(module_name, module_name) {
@@ -292,7 +292,7 @@ pub fn mul(a: &Tensor, b: &mut Tensor) -> Result<(), SmeltError> {
         }));
     }
 
-    let dev = a.device();
+    let dev = a.cuda();
 
     let module_name = "mul_fwd_f32";
     if !dev.has_func(module_name, module_name) {
@@ -325,7 +325,7 @@ pub fn broadcast_mul(a: &Tensor, b: &mut Tensor) -> Result<(), SmeltError> {
         }));
     }
 
-    let dev = a.device();
+    let dev = a.cuda();
 
     let module_name = "bmul_fwd_f32";
     if !dev.has_func(module_name, module_name) {
@@ -352,7 +352,7 @@ pub fn normalize(x: &mut Tensor, epsilon: f32) -> Result<(), SmeltError> {
     let dim = x.shape().len();
     let numel: usize = x.shape()[..dim - 1].iter().product();
     let size = x.shape()[dim - 1];
-    let dev = x.device();
+    let dev = x.cuda();
 
     let module_name = "normalize_f32";
     if !dev.has_func(module_name, module_name) {
@@ -379,7 +379,7 @@ fn g_softmax<const CAUSAL: bool>(
     let m = x.shape()[dim - 2];
     let n = x.shape()[dim - 1];
 
-    let dev = x.device();
+    let dev = x.cuda();
 
     let module_name = "softmax_f32";
     if !dev.has_func(module_name, module_name) {
@@ -412,7 +412,7 @@ const UNITARY_PTX: &str = include_str!(concat!(env!("OUT_DIR"), "/unitary.ptx"))
 /// utility function to use a faster but less precise tanh
 #[inline]
 pub fn tanh(x: &mut Tensor) -> Result<(), SmeltError> {
-    let dev = x.device();
+    let dev = x.cuda();
     let module_name = "tanh_f32";
     if !dev.has_func(module_name, module_name) {
         dev.load_ptx(UNITARY_PTX.into(), module_name, &[module_name])?;
@@ -432,7 +432,7 @@ pub fn tanh(x: &mut Tensor) -> Result<(), SmeltError> {
 #[inline]
 pub fn gelu(x: &mut Tensor) -> Result<(), SmeltError> {
     let module_name = "gelu_f32";
-    let dev = x.device();
+    let dev = x.cuda();
     if !dev.has_func(module_name, module_name) {
         dev.load_ptx(UNITARY_PTX.into(), module_name, &[module_name])?;
     }
@@ -447,7 +447,7 @@ pub fn gelu(x: &mut Tensor) -> Result<(), SmeltError> {
 /// TODO
 #[inline]
 pub fn mul_scalar(x: &mut Tensor, factor: f32) -> Result<(), SmeltError> {
-    let dev = x.device();
+    let dev = x.cuda();
     let module_name = "mul_scalar_f32";
     if !dev.has_func(module_name, module_name) {
         dev.load_ptx(UNITARY_PTX.into(), module_name, &[module_name])?;

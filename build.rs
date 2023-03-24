@@ -106,7 +106,7 @@ fn suggest_setvars_cmd(root: &str) -> String {
     }
 }
 
-#[cfg(feature = "gpu")]
+#[cfg(feature = "cuda")]
 mod cuda {
     pub fn build_ptx() {
         let out_dir = std::env::var("OUT_DIR").unwrap();
@@ -300,7 +300,7 @@ fn main() -> Result<(), BuildError> {
         }
     }
 
-    #[cfg(feature = "gpu")]
+    #[cfg(feature = "cuda")]
     cuda::build_ptx();
 
     Ok(())

@@ -7,5 +7,4 @@ mod tensor;
 mod traits;
 
 pub use ops::*;
-pub use tensor::device;
-pub use tensor::Tensor;
+pub use tensor::{Device, Tensor};

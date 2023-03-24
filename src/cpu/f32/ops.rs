@@ -36,24 +36,20 @@ pub fn select(ids: &[usize], weights: &Tensor, out: &mut Tensor) -> Result<(), S
 }
 
 /// Regular matrix multiplication
-pub fn matmul<'a>(a: &Tensor<'a>, b: &Tensor<'a>, out: &mut Tensor<'a>) -> Result<(), SmeltError> {
+pub fn matmul(a: &Tensor, b: &Tensor, out: &mut Tensor) -> Result<(), SmeltError> {
     g_matmul::<false>(a, b, out)
 }
 
 /// Matrix multiplication matmul(A, B.transposed())
-pub fn matmul_t<'a>(
-    a: &Tensor<'a>,
-    b: &Tensor<'a>,
-    out: &mut Tensor<'a>,
-) -> Result<(), SmeltError> {
+pub fn matmul_t(a: &Tensor, b: &Tensor, out: &mut Tensor) -> Result<(), SmeltError> {
     g_matmul::<true>(a, b, out)
 }
 
 #[inline]
-fn g_matmul<'a, const TRANSPOSE: bool>(
-    a: &Tensor<'a>,
-    b: &Tensor<'a>,
-    c: &mut Tensor<'a>,
+fn g_matmul<const TRANSPOSE: bool>(
+    a: &Tensor,
+    b: &Tensor,
+    c: &mut Tensor,
 ) -> Result<(), SmeltError> {
     #[cfg(not(any(feature = "cblas", feature = "matrixmultiply", feature = "intel-mkl")))]
     panic!("Matmul requires at least `cblas`, `intel-mkl` or `matrixmultiply` feature");

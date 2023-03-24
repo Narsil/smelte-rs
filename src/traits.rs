@@ -3,9 +3,19 @@ use crate::SmeltError;
 /// TODO
 pub trait Tensor: Clone {
     /// TODO
+    type Device: Device<Tensor = Self>;
+    /// TODO
     fn shape(&self) -> &[usize];
     /// TODO
-    fn zeros(shape: Vec<usize>) -> Self;
+    fn device(&self) -> &Self::Device;
+}
+
+/// TODO
+pub trait Device {
+    /// TODO
+    type Tensor: Tensor;
+    /// TODO
+    fn zeros(&self, shape: Vec<usize>) -> Result<Self::Tensor, SmeltError>;
 }
 
 /// All common tensor operations

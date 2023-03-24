@@ -3,15 +3,6 @@ use cudarc::cublas::safe::CudaBlas;
 use cudarc::driver::{CudaDevice, CudaSlice, DriverError};
 use std::sync::Arc;
 
-lazy_static::lazy_static! {
-     pub static ref DEVICE_0: Device = Device::new(0).unwrap();
-}
-
-/// TODO
-pub fn device(device_id: usize) -> Device {
-    (*DEVICE_0).clone()
-}
-
 /// Tensor, can own, or borrow the underlying tensor
 #[derive(Clone)]
 pub struct Tensor {
@@ -20,6 +11,7 @@ pub struct Tensor {
     data: CudaSlice<f32>,
 }
 
+/// The GPU device, contains its id, a cuda handle and a cublas handle
 #[derive(Clone)]
 pub struct Device {
     device: Arc<CudaDevice>,
@@ -28,6 +20,7 @@ pub struct Device {
 }
 
 impl Device {
+    /// TODO
     pub fn new(device_id: usize) -> Result<Self, SmeltError> {
         let device = CudaDevice::new(device_id)?;
         let blas = Arc::new(CudaBlas::new(device.clone())?);
@@ -62,7 +55,12 @@ impl Tensor {
     }
 
     /// The device of the device
-    pub fn device(&self) -> Arc<CudaDevice> {
+    pub fn device(&self) -> &Device {
+        &self.device
+    }
+
+    /// The device of the device
+    pub fn cuda(&self) -> Arc<CudaDevice> {
         self.device.device.clone()
     }
 
@@ -93,7 +91,7 @@ impl Tensor {
     }
 
     /// Creates a tensor from a cpu [Vec].
-    pub fn from_cpu(data: &[f32], shape: Vec<usize>, device: Device) -> Result<Self, SmeltError> {
+    pub fn from_cpu(data: &[f32], shape: Vec<usize>, device: &Device) -> Result<Self, SmeltError> {
         if data.len() != shape.iter().product::<usize>() {
             return Err(SmeltError::InvalidBuffer {
                 buffer_size: data.len(),
@@ -102,7 +100,7 @@ impl Tensor {
         }
         let data = device.device.htod_sync_copy(data)?;
         Ok(Self {
-            device,
+            device: device.clone(),
             data,
             shape,
         })
