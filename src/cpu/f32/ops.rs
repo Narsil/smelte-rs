@@ -55,130 +55,133 @@ fn g_matmul<'a, const TRANSPOSE: bool>(
     b: &Tensor<'a>,
     c: &mut Tensor<'a>,
 ) -> Result<(), SmeltError> {
-    let dim = a.shape().len();
+    #[cfg(any(feature = "cblas", feature = "matrixmultiply", feature = "intel-mkl"))]
+    {
+        let dim = a.shape().len();
 
-    if dim < 2 {
-        return Err(SmeltError::InsufficientRank { minimum_rank: 2 });
-    }
-    if b.shape().len() != dim {
-        return Err(SmeltError::InvalidRank { expected_rank: dim });
-    }
-    if c.shape().len() != dim {
-        return Err(SmeltError::InvalidRank { expected_rank: dim });
-    }
-
-    let m = a.shape()[dim - 2];
-    let k = a.shape()[dim - 1];
-
-    let mut expected_c = a.shape().to_vec();
-    let mut expected_b = a.shape().to_vec();
-
-    let (expected_b, n) = if TRANSPOSE {
-        let n = b.shape()[dim - 2];
-        expected_b[dim - 2] = n;
-        expected_b[dim - 1] = k;
-        (expected_b, n)
-    } else {
-        let n = b.shape()[dim - 1];
-        expected_b[dim - 2] = k;
-        expected_b[dim - 1] = n;
-        (expected_b, n)
-    };
-
-    expected_c[dim - 2] = m;
-    expected_c[dim - 1] = n;
-
-    if expected_b != b.shape() {
-        return Err(SmeltError::DimensionMismatch {
-            expected: expected_b,
-            got: b.shape().to_vec(),
-        });
-    }
-
-    if expected_c != c.shape() {
-        return Err(SmeltError::DimensionMismatch {
-            expected: expected_c,
-            got: c.shape().to_vec(),
-        });
-    }
-
-    // Zero out c
-    c.data_mut().iter_mut().for_each(|v| *v = 0.0);
-
-    let batching: usize = a.shape()[..dim - 2].iter().product();
-    let a_skip: usize = m * k;
-    let b_skip: usize = n * k;
-    let c_skip: usize = m * n;
-
-    let ar = k as isize;
-    let ac = 1;
-    let (br, bc) = if TRANSPOSE {
-        (1, b.shape()[dim - 1] as isize)
-    } else {
-        (b.shape()[dim - 1] as isize, 1)
-    };
-    let cr = n as isize;
-    let cc = 1;
-
-    (0..batching).for_each(|step| {
-        let ap = &a.data()[step * a_skip..];
-        let bp = &b.data()[step * b_skip..];
-        let cp = &mut c.data_mut()[step * c_skip..];
-
-        #[cfg(feature = "matrixmultiply")]
-        unsafe {
-            sgemm(
-                m,
-                k,
-                n,
-                1.0,
-                ap.as_ptr(),
-                ar,
-                ac,
-                bp.as_ptr(),
-                br,
-                bc,
-                1.0,
-                cp.as_mut_ptr(),
-                cr,
-                cc,
-            );
+        if dim < 2 {
+            return Err(SmeltError::InsufficientRank { minimum_rank: 2 });
+        }
+        if b.shape().len() != dim {
+            return Err(SmeltError::InvalidRank { expected_rank: dim });
+        }
+        if c.shape().len() != dim {
+            return Err(SmeltError::InvalidRank { expected_rank: dim });
         }
 
-        #[cfg(feature = "cblas")]
-        unsafe {
-            let (m, n, k) = (m as libc::c_int, n as libc::c_int, k as libc::c_int);
-            let (layout, a_tr, b_tr, lda, ldb, ldc) = if cr < cc {
-                let (lda, a_tr) = if ar < ac { (m, NoTr) } else { (k, Tr) };
-                let (ldb, b_tr) = if br < bc { (k, NoTr) } else { (n, Tr) };
-                (ColMajor, a_tr, b_tr, lda, ldb, m)
-            } else {
-                let (lda, a_tr) = if ar < ac { (m, Tr) } else { (k, NoTr) };
-                let (ldb, b_tr) = if br < bc { (k, Tr) } else { (n, NoTr) };
-                (RowMajor, a_tr, b_tr, lda, ldb, n)
-            };
-            sgemm(
-                layout,
-                a_tr,
-                b_tr,
-                m,
-                n,
-                k,
-                1.0,
-                ap.as_ptr(),
-                lda,
-                // a_skip as i32,
-                bp.as_ptr(),
-                ldb,
-                // b_skip as i32,
-                1.0,
-                cp.as_mut_ptr(),
-                ldc,
-                // c_skip as i32,
-                // batching as i32,
-            )
+        let m = a.shape()[dim - 2];
+        let k = a.shape()[dim - 1];
+
+        let mut expected_c = a.shape().to_vec();
+        let mut expected_b = a.shape().to_vec();
+
+        let (expected_b, n) = if TRANSPOSE {
+            let n = b.shape()[dim - 2];
+            expected_b[dim - 2] = n;
+            expected_b[dim - 1] = k;
+            (expected_b, n)
+        } else {
+            let n = b.shape()[dim - 1];
+            expected_b[dim - 2] = k;
+            expected_b[dim - 1] = n;
+            (expected_b, n)
+        };
+
+        expected_c[dim - 2] = m;
+        expected_c[dim - 1] = n;
+
+        if expected_b != b.shape() {
+            return Err(SmeltError::DimensionMismatch {
+                expected: expected_b,
+                got: b.shape().to_vec(),
+            });
         }
-    });
+
+        if expected_c != c.shape() {
+            return Err(SmeltError::DimensionMismatch {
+                expected: expected_c,
+                got: c.shape().to_vec(),
+            });
+        }
+
+        // Zero out c
+        c.data_mut().iter_mut().for_each(|v| *v = 0.0);
+
+        let batching: usize = a.shape()[..dim - 2].iter().product();
+        let a_skip: usize = m * k;
+        let b_skip: usize = n * k;
+        let c_skip: usize = m * n;
+
+        let ar = k as isize;
+        let ac = 1;
+        let (br, bc) = if TRANSPOSE {
+            (1, b.shape()[dim - 1] as isize)
+        } else {
+            (b.shape()[dim - 1] as isize, 1)
+        };
+        let cr = n as isize;
+        let cc = 1;
+
+        (0..batching).for_each(|step| {
+            let ap = &a.data()[step * a_skip..];
+            let bp = &b.data()[step * b_skip..];
+            let cp = &mut c.data_mut()[step * c_skip..];
+
+            #[cfg(feature = "matrixmultiply")]
+            unsafe {
+                sgemm(
+                    m,
+                    k,
+                    n,
+                    1.0,
+                    ap.as_ptr(),
+                    ar,
+                    ac,
+                    bp.as_ptr(),
+                    br,
+                    bc,
+                    1.0,
+                    cp.as_mut_ptr(),
+                    cr,
+                    cc,
+                );
+            }
+
+            #[cfg(feature = "cblas")]
+            unsafe {
+                let (m, n, k) = (m as libc::c_int, n as libc::c_int, k as libc::c_int);
+                let (layout, a_tr, b_tr, lda, ldb, ldc) = if cr < cc {
+                    let (lda, a_tr) = if ar < ac { (m, NoTr) } else { (k, Tr) };
+                    let (ldb, b_tr) = if br < bc { (k, NoTr) } else { (n, Tr) };
+                    (ColMajor, a_tr, b_tr, lda, ldb, m)
+                } else {
+                    let (lda, a_tr) = if ar < ac { (m, Tr) } else { (k, NoTr) };
+                    let (ldb, b_tr) = if br < bc { (k, Tr) } else { (n, NoTr) };
+                    (RowMajor, a_tr, b_tr, lda, ldb, n)
+                };
+                sgemm(
+                    layout,
+                    a_tr,
+                    b_tr,
+                    m,
+                    n,
+                    k,
+                    1.0,
+                    ap.as_ptr(),
+                    lda,
+                    // a_skip as i32,
+                    bp.as_ptr(),
+                    ldb,
+                    // b_skip as i32,
+                    1.0,
+                    cp.as_mut_ptr(),
+                    ldc,
+                    // c_skip as i32,
+                    // batching as i32,
+                )
+            }
+        });
+    }
     Ok(())
 }
 
