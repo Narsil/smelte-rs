@@ -94,6 +94,7 @@
 //! the various ops from ggml (hopefully to get the full performance).
 
 /// The various CPU implementations
+#[cfg(feature = "cpu")]
 pub mod cpu;
 
 /// The various GPU implementations

@@ -98,7 +98,7 @@ impl Tensor {
                 shape,
             });
         }
-        let data = device.device.htod_sync_copy(data)?;
+        let data = device.device.htod_sync_copy(data).unwrap();
         Ok(Self {
             device: device.clone(),
             data,

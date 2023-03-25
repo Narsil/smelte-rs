@@ -47,10 +47,13 @@ impl Config {
     }
 }
 
-fn create_classifier(tensors: &SafeTensors, num_heads: usize) -> BertClassifier<Tensor> {
-    let mut classifier = BertClassifier::from_tensors(tensors)?;
+fn create_classifier(
+    tensors: &SafeTensors,
+    num_heads: usize,
+) -> Result<BertClassifier<Tensor>, SmeltError> {
+    let mut classifier = BertClassifier::from_tensors(tensors);
     classifier.set_num_heads(num_heads);
-    classifier
+    Ok(classifier)
 }
 
 pub fn main() -> Result<(), BertError> {
@@ -125,7 +128,7 @@ pub fn main() -> Result<(), BertError> {
     let config_str: String = std::fs::read_to_string(filename).expect("Could not read config");
     let config: Config = serde_json::from_str(&config_str).expect("Could not parse Config");
 
-    let bert = create_classifier(&tensors, config.num_attention_heads);
+    let bert = create_classifier(&tensors, config.num_attention_heads).unwrap();
     println!("Loaded {:?}", start.elapsed());
 
     let encoded = tokenizer.encode(string.clone(), false).unwrap();

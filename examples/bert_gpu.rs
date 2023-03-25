@@ -378,7 +378,6 @@ mod gpu {
         let mut bert = BertClassifier::from_tensors(&tensors, &device);
         bert.set_num_heads(config.num_attention_heads);
 
-        let device = bert.classifier.weight().device();
         println!("Loaded {:?}", start.elapsed());
 
         let encoded = tokenizer.encode(string.clone(), false).unwrap();

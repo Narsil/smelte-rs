@@ -1,3 +1,4 @@
+#[cfg(feature = "cpu")]
 use crate::cpu::f32::{matmul, matmul_t, softmax, Tensor as F32Tensor};
 
 #[cfg(feature = "cuda")]
@@ -65,82 +66,107 @@ impl<T: Tensor> BertContext<T> {
     }
 }
 
-fn split_heads(q: &F32Tensor, out_q: &mut F32Tensor) -> Result<(), SmeltError> {
-    let num_heads = out_q.shape()[0];
-    let sequence_length = out_q.shape()[1];
-    let head_dim = out_q.shape()[2];
-    let hidden_dim = head_dim * num_heads;
+#[cfg(feature = "cpu")]
+mod cpu {
+    use super::*;
 
-    (0..num_heads).for_each(|i| {
-        (0..sequence_length).for_each(|j| {
-            (0..head_dim).for_each(|k| {
-                let index = j * hidden_dim + i * head_dim + k;
-                let out_index = i * sequence_length * head_dim + j * head_dim + k;
-                out_q.data_mut()[out_index] = q.data()[index];
+    fn split_heads(q: &F32Tensor, out_q: &mut F32Tensor) -> Result<(), SmeltError> {
+        let num_heads = out_q.shape()[0];
+        let sequence_length = out_q.shape()[1];
+        let head_dim = out_q.shape()[2];
+        let hidden_dim = head_dim * num_heads;
+
+        (0..num_heads).for_each(|i| {
+            (0..sequence_length).for_each(|j| {
+                (0..head_dim).for_each(|k| {
+                    let index = j * hidden_dim + i * head_dim + k;
+                    let out_index = i * sequence_length * head_dim + j * head_dim + k;
+                    out_q.data_mut()[out_index] = q.data()[index];
+                });
             });
         });
-    });
-    Ok(())
-}
+        Ok(())
+    }
 
-#[inline]
-fn unsplit_heads(src: &F32Tensor, dst: &mut F32Tensor) -> Result<(), SmeltError> {
-    let num_heads = src.shape()[0];
-    let sequence_length = src.shape()[1];
-    let head_dim = src.shape()[2];
-    let hidden_dim = head_dim * num_heads;
-    (0..num_heads).for_each(|i| {
-        (0..sequence_length).for_each(|j| {
-            (0..head_dim).for_each(|k| {
-                let in_index = i * sequence_length * head_dim + j * head_dim + k;
-                let out_index = j * hidden_dim + i * head_dim + k;
-                dst.data_mut()[out_index] = src.data()[in_index];
+    #[inline]
+    fn unsplit_heads(src: &F32Tensor, dst: &mut F32Tensor) -> Result<(), SmeltError> {
+        let num_heads = src.shape()[0];
+        let sequence_length = src.shape()[1];
+        let head_dim = src.shape()[2];
+        let hidden_dim = head_dim * num_heads;
+        (0..num_heads).for_each(|i| {
+            (0..sequence_length).for_each(|j| {
+                (0..head_dim).for_each(|k| {
+                    let in_index = i * sequence_length * head_dim + j * head_dim + k;
+                    let out_index = j * hidden_dim + i * head_dim + k;
+                    dst.data_mut()[out_index] = src.data()[in_index];
+                });
             });
         });
-    });
-    Ok(())
-}
+        Ok(())
+    }
 
-fn attention(
-    q_weights: &Linear<F32Tensor>,
-    k_weights: &Linear<F32Tensor>,
-    v_weights: &Linear<F32Tensor>,
-    ctx: &mut BertContext<F32Tensor>,
-) -> Result<(), SmeltError> {
-    q_weights.forward(&ctx.hidden_states, &mut ctx.hidden_states_copy)?;
-    split_heads(&ctx.hidden_states_copy, &mut ctx.q_cache)?;
+    fn attention(
+        q_weights: &Linear<F32Tensor>,
+        k_weights: &Linear<F32Tensor>,
+        v_weights: &Linear<F32Tensor>,
+        ctx: &mut BertContext<F32Tensor>,
+    ) -> Result<(), SmeltError> {
+        q_weights.forward(&ctx.hidden_states, &mut ctx.hidden_states_copy)?;
+        split_heads(&ctx.hidden_states_copy, &mut ctx.q_cache)?;
 
-    debug!("Q head splitted", ctx.q_cache);
+        debug!("Q head splitted", ctx.q_cache);
 
-    k_weights.forward(&ctx.hidden_states, &mut ctx.hidden_states_copy)?;
-    split_heads(&ctx.hidden_states_copy, &mut ctx.k_cache)?;
+        k_weights.forward(&ctx.hidden_states, &mut ctx.hidden_states_copy)?;
+        split_heads(&ctx.hidden_states_copy, &mut ctx.k_cache)?;
 
-    debug!("K head splitted", ctx.k_cache);
+        debug!("K head splitted", ctx.k_cache);
 
-    v_weights.forward(&ctx.hidden_states, &mut ctx.hidden_states_copy)?;
-    split_heads(&ctx.hidden_states_copy, &mut ctx.v_cache)?;
+        v_weights.forward(&ctx.hidden_states, &mut ctx.hidden_states_copy)?;
+        split_heads(&ctx.hidden_states_copy, &mut ctx.v_cache)?;
 
-    debug!("V head splitted", ctx.v_cache);
+        debug!("V head splitted", ctx.v_cache);
 
-    matmul_t(&ctx.q_cache, &ctx.k_cache, &mut ctx.qk).unwrap();
+        matmul_t(&ctx.q_cache, &ctx.k_cache, &mut ctx.qk).unwrap();
 
-    // let num_heads = ctx.q_cache.shape()[0];
-    // let sequence_length = ctx.q_cache.shape()[1];
-    let head_dim = ctx.q_cache.shape()[2];
-    // let hidden_dim = head_dim * num_heads;
-    let scale = (head_dim as f32).sqrt();
-    ctx.qk.data_mut().iter_mut().for_each(|v| *v /= scale);
+        // let num_heads = ctx.q_cache.shape()[0];
+        // let sequence_length = ctx.q_cache.shape()[1];
+        let head_dim = ctx.q_cache.shape()[2];
+        // let hidden_dim = head_dim * num_heads;
+        let scale = (head_dim as f32).sqrt();
+        ctx.qk.data_mut().iter_mut().for_each(|v| *v /= scale);
 
-    softmax(&mut ctx.qk).unwrap();
-    debug!("attention_probs", ctx.qk);
-    matmul(&ctx.qk, &ctx.v_cache, &mut ctx.qkv)?;
-    debug!("qkv", ctx.qkv);
+        softmax(&mut ctx.qk).unwrap();
+        debug!("attention_probs", ctx.qk);
+        matmul(&ctx.qk, &ctx.v_cache, &mut ctx.qkv)?;
+        debug!("qkv", ctx.qkv);
 
-    unsplit_heads(&ctx.qkv, &mut ctx.hidden_states_attn_output)?;
+        unsplit_heads(&ctx.qkv, &mut ctx.hidden_states_attn_output)?;
 
-    debug!("qkv (reshaed)", ctx.hidden_states_attn_output);
+        debug!("qkv (reshaed)", ctx.hidden_states_attn_output);
 
-    Ok(())
+        Ok(())
+    }
+
+    impl TensorAttention<F32Tensor> for F32Tensor {
+        fn attention(
+            query: &Linear<F32Tensor>,
+            key: &Linear<F32Tensor>,
+            value: &Linear<F32Tensor>,
+            ctx: &mut BertContext<F32Tensor>,
+        ) -> Result<(), SmeltError> {
+            attention(query, key, value, ctx)?;
+            Ok(())
+        }
+    }
+
+    impl TensorDebug<F32Tensor> for F32Tensor {
+        fn cpu_data(&self) -> Result<Vec<f32>, SmeltError> {
+            Ok(self.data().to_vec())
+        }
+    }
+
+    impl BertOps<F32Tensor> for F32Tensor {}
 }
 
 #[cfg(feature = "cuda")]
@@ -296,28 +322,8 @@ pub trait TensorDebug<T: Tensor> {
     fn cpu_data(&self) -> Result<Vec<f32>, SmeltError>;
 }
 
-impl TensorAttention<F32Tensor> for F32Tensor {
-    fn attention(
-        query: &Linear<F32Tensor>,
-        key: &Linear<F32Tensor>,
-        value: &Linear<F32Tensor>,
-        ctx: &mut BertContext<F32Tensor>,
-    ) -> Result<(), SmeltError> {
-        attention(query, key, value, ctx)?;
-        Ok(())
-    }
-}
-
-impl TensorDebug<F32Tensor> for F32Tensor {
-    fn cpu_data(&self) -> Result<Vec<f32>, SmeltError> {
-        Ok(self.data().to_vec())
-    }
-}
-
 /// TODO
 pub trait BertOps<T: Tensor>: TensorOps<T> + TensorAttention<T> + TensorDebug<T> {}
-
-impl BertOps<F32Tensor> for F32Tensor {}
 
 /// TODO
 #[derive(Clone)]

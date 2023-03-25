@@ -51,9 +51,6 @@ fn g_matmul<const TRANSPOSE: bool>(
     b: &Tensor,
     c: &mut Tensor,
 ) -> Result<(), SmeltError> {
-    #[cfg(not(any(feature = "cblas", feature = "matrixmultiply", feature = "intel-mkl")))]
-    panic!("Matmul requires at least `cblas`, `intel-mkl` or `matrixmultiply` feature");
-
     let dim = a.shape().len();
 
     if dim < 2 {

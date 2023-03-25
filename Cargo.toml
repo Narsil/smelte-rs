@@ -24,6 +24,7 @@ keywords = [
 cblas-sys = { version = "0.1.4", default-features = false, optional = true }
 matrixmultiply = { version = "0.3.2", default-features = false, optional = true }
 libc = { version = "0.2", default-features = false }
+# cudarc = { git = "https://github.com/Narsil/cudarc.git", optional = true, default-features=false, features=["driver", "cublas", "alloc_async"] }
 cudarc = { git = "https://github.com/Narsil/cudarc.git", optional = true, default-features=false, features=["driver", "cublas"] }
 
 [dev-dependencies]
@@ -39,10 +40,11 @@ glob = { version = "0.3.1", optional = true }
 
 [features]
 default = []
-cblas = ["dep:cblas-sys"]
-intel-mkl = ["dep:cblas-sys"]
-matrixmultiply = ["matrixmultiply/threading"]
+cblas = ["dep:cblas-sys", "cpu"]
+intel-mkl = ["dep:cblas-sys", "cpu"]
+matrixmultiply = ["matrixmultiply/threading", "cpu"]
 cuda = ["dep:cudarc", "dep:glob"]
+cpu = []
 
 
 [[example]]
