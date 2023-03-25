@@ -3,12 +3,16 @@ use std::borrow::Cow;
 
 /// Tensor, can own, or borrow the underlying tensor
 #[derive(Clone)]
-pub struct Tensor<'data> {
+pub struct Tensor {
     pub(super) shape: Vec<usize>,
-    data: Cow<'data, [f32]>,
+    data: Cow<'static, [f32]>,
 }
 
-impl<'data> Tensor<'data> {
+/// The CPU device
+#[derive(Copy, Clone)]
+pub struct Device {}
+
+impl Tensor {
     /// The shape of the tensor
     /// ```
     /// use smelte_rs::cpu::f32::Tensor;
@@ -59,11 +63,10 @@ impl<'data> Tensor<'data> {
     /// ```
     /// use smelte_rs::cpu::f32::Tensor;
     ///
-    /// let data = [1.0, 2.0, 3.0, 4.0];
-    /// let tensor = Tensor::borrowed(&data, vec![2, 2]).unwrap();
+    /// let tensor = Tensor::borrowed(&[1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
     /// ```
-    pub fn borrowed(data: &'data [f32], shape: Vec<usize>) -> Result<Self, SmeltError> {
-        let cow: Cow<'data, [f32]> = data.into();
+    pub fn borrowed(data: &'static [f32], shape: Vec<usize>) -> Result<Self, SmeltError> {
+        let cow: Cow<'static, [f32]> = data.into();
         Self::new(cow, shape)
     }
 
@@ -76,7 +79,7 @@ impl<'data> Tensor<'data> {
     /// ```
     pub fn new<T>(data: T, shape: Vec<usize>) -> Result<Self, SmeltError>
     where
-        T: Into<Cow<'data, [f32]>>,
+        T: Into<Cow<'static, [f32]>>,
     {
         let data = data.into();
         if data.len() != shape.iter().product::<usize>() {

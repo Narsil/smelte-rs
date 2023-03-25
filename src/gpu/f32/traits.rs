@@ -1,24 +1,31 @@
 use super::ops;
-use super::tensor::{Tensor, DEVICE_0};
+use super::tensor::{Device, Tensor};
 use crate::traits::{
-    Tensor as TensorTrait, TensorAdd, TensorGelu, TensorMatmul, TensorMatmulT, TensorMul,
-    TensorNormalize, TensorOps, TensorSelect, TensorSoftmax, TensorTanh,
+    Device as DeviceTrait, Tensor as TensorTrait, TensorAdd, TensorGelu, TensorMatmul,
+    TensorMatmulT, TensorMul, TensorNormalize, TensorOps, TensorSelect, TensorSoftmax, TensorTanh,
 };
 use crate::SmeltError;
-use cudarc::driver::CudaDevice;
-use std::sync::Arc;
 
-impl<'a> TensorTrait for Tensor {
+impl TensorTrait for Tensor {
+    type Device = Device;
+
     fn shape(&self) -> &[usize] {
         &self.shape()
     }
-    fn zeros(shape: Vec<usize>) -> Self {
-        // TODO
-        Self::zeros(shape, (*DEVICE_0).clone()).unwrap()
+
+    fn device(&self) -> &Device {
+        &self.device()
     }
 }
 
-impl<'a> TensorAdd<Tensor> for Tensor {
+impl DeviceTrait for Device {
+    type Tensor = Tensor;
+    fn zeros(&self, shape: Vec<usize>) -> Result<Self::Tensor, SmeltError> {
+        Ok(Self::Tensor::zeros(shape, self)?)
+    }
+}
+
+impl TensorAdd<Tensor> for Tensor {
     fn add(x: &Self, y: &mut Self) -> Result<(), SmeltError> {
         ops::add(x, y)
     }
@@ -27,7 +34,7 @@ impl<'a> TensorAdd<Tensor> for Tensor {
     }
 }
 
-impl<'a> TensorMul<Tensor> for Tensor {
+impl TensorMul<Tensor> for Tensor {
     fn mul(x: &Self, y: &mut Self) -> Result<(), SmeltError> {
         ops::mul(x, y)
     }
@@ -36,48 +43,48 @@ impl<'a> TensorMul<Tensor> for Tensor {
     }
 }
 
-impl<'a> TensorNormalize<Tensor> for Tensor {
+impl TensorNormalize<Tensor> for Tensor {
     fn normalize(x: &mut Self, epsilon: f32) -> Result<(), SmeltError> {
         ops::normalize(x, epsilon)
     }
 }
 
-impl<'a> TensorMatmul<Tensor> for Tensor {
+impl TensorMatmul<Tensor> for Tensor {
     fn matmul(x: &Self, y: &Self, out: &mut Self) -> Result<(), SmeltError> {
         ops::matmul(x, y, out)
     }
 }
 
-impl<'a> TensorMatmulT<Tensor> for Tensor {
+impl TensorMatmulT<Tensor> for Tensor {
     fn matmul_t(x: &Self, y: &Self, out: &mut Self) -> Result<(), SmeltError> {
         ops::matmul_t(x, y, out)
     }
 }
 
-impl<'a> TensorSelect<Tensor> for Tensor {
+impl TensorSelect<Tensor> for Tensor {
     fn select(x: &[usize], weight: &Self, out: &mut Self) -> Result<(), SmeltError> {
         ops::select(x, weight, out)
     }
 }
 
-impl<'a> TensorGelu<Tensor> for Tensor {
+impl TensorGelu<Tensor> for Tensor {
     fn gelu(x: &mut Tensor) -> Result<(), SmeltError> {
         ops::gelu(x)?;
         Ok(())
     }
 }
 
-impl<'a> TensorTanh<Tensor> for Tensor {
+impl TensorTanh<Tensor> for Tensor {
     fn tanh(x: &mut Tensor) -> Result<(), SmeltError> {
         ops::tanh(x)?;
         Ok(())
     }
 }
 
-impl<'a> TensorSoftmax<Tensor> for Tensor {
+impl TensorSoftmax<Tensor> for Tensor {
     fn softmax(x: &mut Tensor) -> Result<(), SmeltError> {
         ops::softmax(x)
     }
 }
 
-impl<'a> TensorOps<Tensor> for Tensor {}
+impl TensorOps<Tensor> for Tensor {}

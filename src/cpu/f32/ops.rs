@@ -4,7 +4,7 @@ use crate::SmeltError;
 #[cfg(feature = "matrixmultiply")]
 use matrixmultiply::sgemm;
 
-#[cfg(feature = "cblas")]
+#[cfg(any(feature = "cblas", feature = "intel-mkl"))]
 use cblas_sys::{
     cblas_sgemm as sgemm, CblasColMajor as ColMajor, CblasNoTrans as NoTr,
     CblasRowMajor as RowMajor, CblasTrans as Tr,
@@ -36,24 +36,20 @@ pub fn select(ids: &[usize], weights: &Tensor, out: &mut Tensor) -> Result<(), S
 }
 
 /// Regular matrix multiplication
-pub fn matmul<'a>(a: &Tensor<'a>, b: &Tensor<'a>, out: &mut Tensor<'a>) -> Result<(), SmeltError> {
+pub fn matmul(a: &Tensor, b: &Tensor, out: &mut Tensor) -> Result<(), SmeltError> {
     g_matmul::<false>(a, b, out)
 }
 
 /// Matrix multiplication matmul(A, B.transposed())
-pub fn matmul_t<'a>(
-    a: &Tensor<'a>,
-    b: &Tensor<'a>,
-    out: &mut Tensor<'a>,
-) -> Result<(), SmeltError> {
+pub fn matmul_t(a: &Tensor, b: &Tensor, out: &mut Tensor) -> Result<(), SmeltError> {
     g_matmul::<true>(a, b, out)
 }
 
 #[inline]
-fn g_matmul<'a, const TRANSPOSE: bool>(
-    a: &Tensor<'a>,
-    b: &Tensor<'a>,
-    c: &mut Tensor<'a>,
+fn g_matmul<const TRANSPOSE: bool>(
+    a: &Tensor,
+    b: &Tensor,
+    c: &mut Tensor,
 ) -> Result<(), SmeltError> {
     let dim = a.shape().len();
 
@@ -145,7 +141,7 @@ fn g_matmul<'a, const TRANSPOSE: bool>(
             );
         }
 
-        #[cfg(feature = "cblas")]
+        #[cfg(any(feature = "cblas", feature = "intel-mkl"))]
         unsafe {
             let (m, n, k) = (m as libc::c_int, n as libc::c_int, k as libc::c_int);
             let (layout, a_tr, b_tr, lda, ldb, ldc) = if cr < cc {
@@ -398,8 +394,8 @@ mod tests {
     fn simple_matmul() {
         let data = vec![1.0, 2.0, 3.0, 4.0];
         let a = Tensor::new(data, vec![2, 2]).unwrap();
-        let data = [1.0, 2.0, 3.0, 4.0];
-        let b = Tensor::borrowed(&data, vec![2, 2]).unwrap();
+        let data = vec![1.0, 2.0, 3.0, 4.0];
+        let b = Tensor::new(data, vec![2, 2]).unwrap();
         let data = vec![0.0; 4];
         let mut c = Tensor::new(data, vec![2, 2]).unwrap();
 
@@ -410,8 +406,8 @@ mod tests {
 
         let data = vec![1.0, 2.0];
         let a = Tensor::new(data, vec![2, 1]).unwrap();
-        let data = [3.0, 4.0];
-        let b = Tensor::borrowed(&data, vec![1, 2]).unwrap();
+        let data = vec![3.0, 4.0];
+        let b = Tensor::new(data, vec![1, 2]).unwrap();
         let data = vec![0.0; 4];
         let mut c = Tensor::new(data, vec![2, 2]).unwrap();
         matmul(&a, &b, &mut c).unwrap();
@@ -438,14 +434,14 @@ mod tests {
     fn simple_matmul_t() {
         let a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         // A.T
-        let b = Tensor::borrowed(&[1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
+        let b = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
         let mut c = Tensor::zeros(vec![2, 2]);
 
         matmul_t(&a, &b, &mut c).unwrap();
         assert_eq!(c.data(), &[7.0, 10.0, 15.0, 22.0]);
 
         let a = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let b = Tensor::borrowed(&[3.0, 4.0], vec![2, 1]).unwrap();
+        let b = Tensor::new(vec![3.0, 4.0], vec![2, 1]).unwrap();
         let mut c = Tensor::zeros(vec![2, 2]);
         matmul_t(&a, &b, &mut c).unwrap();
         assert_eq!(c.data(), &[3.0, 4.0, 6.0, 8.0]);

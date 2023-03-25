@@ -1,5 +1,5 @@
 //! This build script emits the openblas linking directive if requested
-#[cfg(not(feature = "matrixmultiply"))]
+#![allow(unused_variables)]
 #[derive(PartialEq, Eq)]
 enum Library {
     Static,
@@ -106,7 +106,7 @@ fn suggest_setvars_cmd(root: &str) -> String {
     }
 }
 
-#[cfg(feature = "gpu")]
+#[cfg(feature = "cuda")]
 mod cuda {
     pub fn build_ptx() {
         let out_dir = std::env::var("OUT_DIR").unwrap();
@@ -204,21 +204,19 @@ fn main() -> Result<(), BuildError> {
     println!("cargo:rerun-if-changed=build.rs");
 
     println!("cargo:rerun-if-env-changed=STATIC");
-    #[cfg(not(feature = "matrixmultiply"))]
     let library = if std::env::var("STATIC").unwrap_or_else(|_| "0".to_string()) == "1" {
         Library::Static
     } else {
         Library::Dynamic
     };
 
-    #[cfg(not(feature = "matrixmultiply"))]
     let link_type: &str = if Library::Static == library {
         "static"
     } else {
         "dylib"
     };
 
-    #[cfg(not(feature = "matrixmultiply"))]
+    #[cfg(feature = "cblas")]
     println!("cargo:rustc-link-lib={link_type}=cblas");
 
     #[cfg(feature = "intel-mkl")]
@@ -302,7 +300,7 @@ fn main() -> Result<(), BuildError> {
         }
     }
 
-    #[cfg(feature = "gpu")]
+    #[cfg(feature = "cuda")]
     cuda::build_ptx();
 
     Ok(())

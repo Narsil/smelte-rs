@@ -73,8 +73,10 @@ impl<T: Tensor + TensorOps<T>> UnbiasedLinear<T> {
 }
 
 #[cfg(test)]
+#[cfg(feature = "cpu")]
 mod tests {
     use super::*;
+
     use crate::cpu::f32::Tensor;
 
     #[test]

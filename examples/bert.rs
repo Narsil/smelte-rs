@@ -1,4 +1,4 @@
-use memmap2::MmapOptions;
+use memmap2::{Mmap, MmapOptions};
 use safetensors::{
     tensor::{Dtype, SafeTensorError, TensorView},
     SafeTensors,
@@ -36,10 +36,24 @@ pub struct Config {
     id2label: Option<HashMap<String, String>>,
 }
 
+fn leak_buffer(buffer: Mmap) -> &'static [u8] {
+    let buffer: &'static mut Mmap = Box::leak(Box::new(buffer));
+    buffer
+}
+
 impl Config {
     pub fn id2label(&self) -> Option<&HashMap<String, String>> {
         self.id2label.as_ref()
     }
+}
+
+fn create_classifier(
+    tensors: &SafeTensors,
+    num_heads: usize,
+) -> Result<BertClassifier<Tensor>, SmeltError> {
+    let mut classifier = BertClassifier::from_tensors(tensors);
+    classifier.set_num_heads(num_heads);
+    Ok(classifier)
 }
 
 pub fn main() -> Result<(), BertError> {
@@ -88,6 +102,7 @@ pub fn main() -> Result<(), BertError> {
 
     let file = File::open(filename)?;
     let buffer = unsafe { MmapOptions::new().map(&file)? };
+    let buffer: &'static [u8] = leak_buffer(buffer);
     let tensors = SafeTensors::deserialize(&buffer)?;
     println!("Safetensors {:?}", start.elapsed());
 
@@ -113,8 +128,7 @@ pub fn main() -> Result<(), BertError> {
     let config_str: String = std::fs::read_to_string(filename).expect("Could not read config");
     let config: Config = serde_json::from_str(&config_str).expect("Could not parse Config");
 
-    let mut bert = BertClassifier::from_tensors(&tensors);
-    bert.set_num_heads(config.num_attention_heads);
+    let bert = create_classifier(&tensors, config.num_attention_heads).unwrap();
     println!("Loaded {:?}", start.elapsed());
 
     let encoded = tokenizer.encode(string.clone(), false).unwrap();
@@ -151,19 +165,19 @@ pub fn get_label(id2label: Option<&HashMap<String, String>>, i: usize) -> Option
     Some(label)
 }
 
-pub trait FromSafetensors<'a> {
-    fn from_tensors(tensors: &'a SafeTensors<'a>) -> Self
+pub trait FromSafetensors {
+    fn from_tensors(tensors: &SafeTensors) -> Self
     where
         Self: Sized;
 }
 
-fn to_tensor<'data>(view: TensorView<'data>) -> Result<Tensor<'data>, SmeltError> {
+fn to_tensor<'data>(view: TensorView<'data>) -> Result<Tensor, SmeltError> {
     let shape = view.shape().to_vec();
     let data = to_f32(view);
     Tensor::new(data, shape)
 }
 
-pub fn to_f32<'data>(view: TensorView<'data>) -> Cow<'data, [f32]> {
+pub fn to_f32<'data>(view: TensorView<'data>) -> Cow<'static, [f32]> {
     assert_eq!(view.dtype(), Dtype::F32);
     let v = view.data();
     if (v.as_ptr() as usize) % 4 == 0 {
@@ -183,23 +197,23 @@ pub fn to_f32<'data>(view: TensorView<'data>) -> Cow<'data, [f32]> {
     }
 }
 
-fn linear_from<'a>(weights: TensorView<'a>, bias: TensorView<'a>) -> Linear<Tensor<'a>> {
+fn linear_from(weights: TensorView, bias: TensorView) -> Linear<Tensor> {
     Linear::new(to_tensor(weights).unwrap(), to_tensor(bias).unwrap())
 }
 
-fn linear_from_prefix<'a>(prefix: &str, tensors: &'a SafeTensors<'a>) -> Linear<Tensor<'a>> {
+fn linear_from_prefix(prefix: &str, tensors: &SafeTensors) -> Linear<Tensor> {
     linear_from(
         tensors.tensor(&format!("{}.weight", prefix)).unwrap(),
         tensors.tensor(&format!("{}.bias", prefix)).unwrap(),
     )
 }
 
-fn embedding_from<'a>(weights: TensorView<'a>) -> Embedding<Tensor<'a>> {
+fn embedding_from(weights: TensorView) -> Embedding<Tensor> {
     Embedding::new(to_tensor(weights).unwrap())
 }
 
-impl<'a> FromSafetensors<'a> for BertClassifier<Tensor<'a>> {
-    fn from_tensors(tensors: &'a SafeTensors<'a>) -> Self
+impl FromSafetensors for BertClassifier<Tensor> {
+    fn from_tensors(tensors: &SafeTensors) -> Self
     where
         Self: Sized,
     {
@@ -221,8 +235,8 @@ impl<'a> FromSafetensors<'a> for BertClassifier<Tensor<'a>> {
     }
 }
 
-impl<'a> FromSafetensors<'a> for BertPooler<Tensor<'a>> {
-    fn from_tensors(tensors: &'a SafeTensors<'a>) -> Self
+impl FromSafetensors for BertPooler<Tensor> {
+    fn from_tensors(tensors: &SafeTensors) -> Self
     where
         Self: Sized,
     {
@@ -234,8 +248,8 @@ impl<'a> FromSafetensors<'a> for BertPooler<Tensor<'a>> {
     }
 }
 
-impl<'a> FromSafetensors<'a> for Bert<Tensor<'a>> {
-    fn from_tensors(tensors: &'a SafeTensors<'a>) -> Self
+impl FromSafetensors for Bert<Tensor> {
+    fn from_tensors(tensors: &SafeTensors) -> Self
     where
         Self: Sized,
     {
@@ -245,8 +259,8 @@ impl<'a> FromSafetensors<'a> for Bert<Tensor<'a>> {
     }
 }
 
-impl<'a> FromSafetensors<'a> for BertEmbeddings<Tensor<'a>> {
-    fn from_tensors(tensors: &'a SafeTensors<'a>) -> Self
+impl FromSafetensors for BertEmbeddings<Tensor> {
+    fn from_tensors(tensors: &SafeTensors) -> Self
     where
         Self: Sized,
     {
@@ -276,18 +290,12 @@ impl<'a> FromSafetensors<'a> for BertEmbeddings<Tensor<'a>> {
     }
 }
 
-fn bert_layer_from_tensors<'a>(
-    index: usize,
-    tensors: &'a SafeTensors<'a>,
-) -> BertLayer<Tensor<'a>> {
+fn bert_layer_from_tensors(index: usize, tensors: &SafeTensors) -> BertLayer<Tensor> {
     let attention = bert_attention_from_tensors(index, tensors);
     let mlp = bert_mlp_from_tensors(index, tensors);
     BertLayer::new(attention, mlp)
 }
-fn bert_attention_from_tensors<'a>(
-    index: usize,
-    tensors: &'a SafeTensors<'a>,
-) -> BertAttention<Tensor<'a>> {
+fn bert_attention_from_tensors(index: usize, tensors: &SafeTensors) -> BertAttention<Tensor> {
     let query = linear_from_prefix(
         &format!("bert.encoder.layer.{index}.attention.self.query"),
         tensors,
@@ -311,7 +319,7 @@ fn bert_attention_from_tensors<'a>(
     BertAttention::new(query, key, value, output, output_ln)
 }
 
-fn bert_mlp_from_tensors<'a>(index: usize, tensors: &'a SafeTensors<'a>) -> Mlp<Tensor<'a>> {
+fn bert_mlp_from_tensors(index: usize, tensors: &SafeTensors) -> Mlp<Tensor> {
     let intermediate = linear_from_prefix(
         &format!("bert.encoder.layer.{index}.intermediate.dense"),
         tensors,
@@ -324,7 +332,7 @@ fn bert_mlp_from_tensors<'a>(index: usize, tensors: &'a SafeTensors<'a>) -> Mlp<
     Mlp::new(intermediate, output, output_ln)
 }
 
-fn layer_norm_from_prefix<'a>(prefix: &str, tensors: &'a SafeTensors<'a>) -> LayerNorm<Tensor<'a>> {
+fn layer_norm_from_prefix(prefix: &str, tensors: &SafeTensors) -> LayerNorm<Tensor> {
     let epsilon = 1e-5;
     if let (Ok(weight), Ok(bias)) = (
         tensors.tensor(&format!("{}.weight", prefix)),
@@ -343,8 +351,8 @@ fn layer_norm_from_prefix<'a>(prefix: &str, tensors: &'a SafeTensors<'a>) -> Lay
         )
     }
 }
-impl<'a> FromSafetensors<'a> for BertEncoder<Tensor<'a>> {
-    fn from_tensors(tensors: &'a SafeTensors<'a>) -> Self
+impl FromSafetensors for BertEncoder<Tensor> {
+    fn from_tensors(tensors: &SafeTensors) -> Self
     where
         Self: Sized,
     {
