@@ -63,8 +63,7 @@ impl Tensor {
     /// ```
     /// use smelte_rs::cpu::f32::Tensor;
     ///
-    /// let data = [1.0, 2.0, 3.0, 4.0];
-    /// let tensor = Tensor::borrowed(&data, vec![2, 2]).unwrap();
+    /// let tensor = Tensor::borrowed(&[1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
     /// ```
     pub fn borrowed(data: &'static [f32], shape: Vec<usize>) -> Result<Self, SmeltError> {
         let cow: Cow<'static, [f32]> = data.into();

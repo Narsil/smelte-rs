@@ -29,6 +29,7 @@ impl<T: Tensor + TensorOps<T>> LayerNorm<T> {
 }
 
 #[cfg(test)]
+#[cfg(feature = "cpu")]
 mod tests {
     use super::*;
     use crate::cpu::f32::Tensor;

@@ -49,13 +49,13 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: clippy
-          args: -- -D warnings
+          args: --features matrixmultiply -- -D warnings
 
       - name: Run Tests
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --verbose
+          args: --features cblas --verbose
 
       - name: Run Audit
         uses: actions-rs/cargo@v1

@@ -25,6 +25,7 @@ impl<T: Tensor + TensorOps<T>> Embedding<T> {
 }
 
 #[cfg(test)]
+#[cfg(feature = "cpu")]
 mod tests {
     use super::*;
     use crate::cpu::f32::Tensor;

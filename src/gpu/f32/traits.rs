@@ -5,8 +5,6 @@ use crate::traits::{
     TensorMatmulT, TensorMul, TensorNormalize, TensorOps, TensorSelect, TensorSoftmax, TensorTanh,
 };
 use crate::SmeltError;
-use cudarc::driver::CudaDevice;
-use std::sync::Arc;
 
 impl TensorTrait for Tensor {
     type Device = Device;
@@ -23,8 +21,7 @@ impl TensorTrait for Tensor {
 impl DeviceTrait for Device {
     type Tensor = Tensor;
     fn zeros(&self, shape: Vec<usize>) -> Result<Self::Tensor, SmeltError> {
-        // TODO
-        Ok(Self::Tensor::zeros(shape, self.clone())?)
+        Ok(Self::Tensor::zeros(shape, self)?)
     }
 }
 

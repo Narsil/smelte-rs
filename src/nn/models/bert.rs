@@ -70,7 +70,7 @@ impl<T: Tensor> BertContext<T> {
 mod cpu {
     use super::*;
 
-    fn split_heads(q: &F32Tensor, out_q: &mut F32Tensor) -> Result<(), SmeltError> {
+    pub(super) fn split_heads(q: &F32Tensor, out_q: &mut F32Tensor) -> Result<(), SmeltError> {
         let num_heads = out_q.shape()[0];
         let sequence_length = out_q.shape()[1];
         let head_dim = out_q.shape()[2];
@@ -89,7 +89,7 @@ mod cpu {
     }
 
     #[inline]
-    fn unsplit_heads(src: &F32Tensor, dst: &mut F32Tensor) -> Result<(), SmeltError> {
+    pub(super) fn unsplit_heads(src: &F32Tensor, dst: &mut F32Tensor) -> Result<(), SmeltError> {
         let num_heads = src.shape()[0];
         let sequence_length = src.shape()[1];
         let head_dim = src.shape()[2];
@@ -661,34 +661,47 @@ impl<T: Tensor + BertOps<T> + TensorAttention<T>> BertClassifier<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "cuda")]
+    use crate::gpu::f32::Device;
+
+    #[cfg(feature = "cuda")]
+    fn device() -> Device {
+        Device::new(0).unwrap()
+    }
 
     #[test]
+    #[cfg(feature = "cpu")]
     fn test_split_heads() {
         let tensor =
             F32Tensor::new(vec![1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0], vec![2, 4]).unwrap();
         let mut out = F32Tensor::zeros(vec![2, 2, 2]);
 
-        split_heads(&tensor, &mut out).unwrap();
+        cpu::split_heads(&tensor, &mut out).unwrap();
         assert_eq!(out.data(), [1.0, 1.0, 2.0, 2.0, 1.0, 1.0, 2.0, 2.0]);
     }
 
     #[test]
+    #[cfg(feature = "cpu")]
     fn test_unsplit_heads() {
         let tensor =
             F32Tensor::new(vec![1.0, 3.0, 2.0, 2.0, 1.0, 1.0, 2.0, 2.0], vec![2, 2, 2]).unwrap();
         let mut out = F32Tensor::zeros(vec![2, 4]);
 
-        unsplit_heads(&tensor, &mut out).unwrap();
+        cpu::unsplit_heads(&tensor, &mut out).unwrap();
         assert_eq!(out.data(), [1.0, 3.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0]);
     }
 
     #[cfg(feature = "cuda")]
     #[test]
     fn test_cuda_split_heads() {
-        let tensor =
-            F32CudaTensor::from_cpu(&[1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0], vec![2, 4], 0)
-                .unwrap();
-        let mut out = F32CudaTensor::zeros(vec![2, 2, 2], 0).unwrap();
+        let device = device();
+        let tensor = F32CudaTensor::from_cpu(
+            &[1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0],
+            vec![2, 4],
+            &device,
+        )
+        .unwrap();
+        let mut out = F32CudaTensor::zeros(vec![2, 2, 2], &device).unwrap();
 
         cuda::cuda_split_heads(&tensor, &mut out).unwrap();
         assert_eq!(
@@ -700,10 +713,14 @@ mod tests {
     #[cfg(feature = "cuda")]
     #[test]
     fn test_cuda_unsplit_heads() {
-        let tensor =
-            F32CudaTensor::from_cpu(&[1.0, 3.0, 2.0, 2.0, 1.0, 1.0, 2.0, 2.0], vec![2, 2, 2], 0)
-                .unwrap();
-        let mut out = F32CudaTensor::zeros(vec![2, 4], 0).unwrap();
+        let device = device();
+        let tensor = F32CudaTensor::from_cpu(
+            &[1.0, 3.0, 2.0, 2.0, 1.0, 1.0, 2.0, 2.0],
+            vec![2, 2, 2],
+            &device,
+        )
+        .unwrap();
+        let mut out = F32CudaTensor::zeros(vec![2, 4], &device).unwrap();
 
         cuda::cuda_unsplit_heads(&tensor, &mut out).unwrap();
         assert_eq!(

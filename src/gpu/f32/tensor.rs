@@ -35,9 +35,10 @@ impl Device {
 impl Tensor {
     /// The shape of the tensor
     /// ```
-    /// use smelte_rs::gpu::f32::Tensor;
+    /// use smelte_rs::gpu::f32::{Tensor, Device};
     ///
-    /// let tensor = Tensor::zeros(vec![2, 2], 0).unwrap();
+    /// let device = Device::new(0).unwrap();
+    /// let tensor = Tensor::zeros(vec![2, 2], &device).unwrap();
     /// assert_eq!(tensor.shape(), vec![2, 2]);
     /// ```
     pub fn shape(&self) -> &[usize] {
@@ -76,17 +77,18 @@ impl Tensor {
 
     /// Creates a new nulled tensor with given shape
     /// ```
-    /// use smelte_rs::gpu::f32::Tensor;
+    /// use smelte_rs::gpu::f32::{Tensor, Device};
     ///
-    /// let tensor = Tensor::zeros(vec![2, 2], 0).unwrap();
+    /// let device = Device::new(0).unwrap();
+    /// let tensor = Tensor::zeros(vec![2, 2], &device).unwrap();
     /// ```
-    pub fn zeros(shape: Vec<usize>, device: Device) -> Result<Self, DriverError> {
+    pub fn zeros(shape: Vec<usize>, device: &Device) -> Result<Self, DriverError> {
         let nelement: usize = shape.iter().product();
         let data: CudaSlice<f32> = device.device.alloc_zeros(nelement)?;
         Ok(Self {
             shape,
             data,
-            device,
+            device: device.clone(),
         })
     }
 

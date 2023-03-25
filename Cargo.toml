@@ -49,6 +49,7 @@ cpu = []
 
 [[example]]
 name = "bert"
+required-features = ["cpu"]
 
 [[example]]
 name = "bert_gpu"
