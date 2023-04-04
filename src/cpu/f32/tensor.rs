@@ -35,6 +35,18 @@ impl Tensor {
         self.data.as_ref()
     }
 
+    /// A slice to the underlying tensor data.
+    /// Exists uniquely for symetry with gpu Tensor.
+    /// ```
+    /// use smelte_rs::cpu::f32::Tensor;
+    ///
+    /// let tensor = Tensor::zeros(vec![2, 2]);
+    /// assert_eq!(tensor.cpu_data(), vec![0.0; 4]);
+    /// ```
+    pub fn cpu_data(&self) -> Result<&[f32], SmeltError> {
+        Ok(self.data.as_ref())
+    }
+
     /// A mutable slice to the underlying tensor data
     /// ```
     /// use smelte_rs::cpu::f32::Tensor;
@@ -78,6 +90,29 @@ impl Tensor {
     /// let tensor = Tensor::new(data, vec![2, 2]).unwrap();
     /// ```
     pub fn new<T>(data: T, shape: Vec<usize>) -> Result<Self, SmeltError>
+    where
+        T: Into<Cow<'static, [f32]>>,
+    {
+        let data = data.into();
+        if data.len() != shape.iter().product::<usize>() {
+            return Err(SmeltError::InvalidBuffer {
+                buffer_size: data.len(),
+                shape,
+            });
+        }
+        Ok(Self { shape, data })
+    }
+
+    /// Creates a new tensor with given shape. Can fail if data doesn't match the shape
+    /// Exists only for symetry with gpu tensor.
+    /// ```
+    /// use smelte_rs::cpu::f32::{Tensor, Device};
+    ///
+    /// let device = Device{};
+    /// let data = vec![1.0, 2.0, 3.0, 4.0];
+    /// let tensor = Tensor::from_cpu(data, vec![2, 2], &device).unwrap();
+    /// ```
+    pub fn from_cpu<T>(data: T, shape: Vec<usize>, _device: &Device) -> Result<Self, SmeltError>
     where
         T: Into<Cow<'static, [f32]>>,
     {

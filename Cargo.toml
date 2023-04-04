@@ -27,7 +27,7 @@ libc = { version = "0.2", default-features = false }
 cudarc = { git = "https://github.com/Narsil/cudarc.git", optional = true, default-features=false, features=["driver", "cublas"] }
 matrixmultiply = { version = "0.3.2", default-features = false, optional = true }
 fast-math = {version = "0.1.1", optional=true }
-rblas = { path = "../rblas", optional=true }
+rblas = { git = "https://github.com/Narsil/rblas", optional=true }
 
 [dev-dependencies]
 serde = { version = "1.0.152", features = ["serde_derive"] }
@@ -52,8 +52,3 @@ cpu = ["dep:fast-math"]
 
 [[example]]
 name = "bert"
-required-features = ["cpu"]
-
-[[example]]
-name = "bert_gpu"
-required-features = ["cuda"]
