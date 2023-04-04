@@ -44,6 +44,14 @@ pub struct BertContext<T: Tensor> {
     hidden_states_copy: T,
     // Store the hidden_states after the attention (prevents a clone in the skip connection)
     hidden_states_attn_output: T,
+    q_cache: T,
+    // Store the k splitted_heads
+    k_cache: T,
+    // Store the k splitted_heads
+    v_cache: T,
+    // Store the qk result
+    qk: T,
+    qkv: T,
     // Intermediate states (H, 4H)
     intermediate_states: T,
     pool: T,
@@ -593,6 +601,7 @@ impl<T: Tensor + BertOps<T> + TensorAttention<T>> BertClassifier<T> {
         input_ids: Vec<usize>,
         position_ids: Vec<usize>,
         type_ids: Vec<usize>,
+        num_heads: usize,
     ) -> Result<BertContext<T>, SmeltError> {
         let hidden_dim = self.bert.embeddings.input_embeddings.weight().shape()[1];
         let intermediate_dim = self.bert.encoder.layers[0]
@@ -601,6 +610,7 @@ impl<T: Tensor + BertOps<T> + TensorAttention<T>> BertClassifier<T> {
             .weight()
             .shape()[0];
         let num_classes = self.classifier.weight().shape()[0];
+        let head_dim = hidden_dim / num_heads;
         let sequence_length = input_ids.len();
 
         let device = self.classifier.weight().device();
@@ -608,6 +618,11 @@ impl<T: Tensor + BertOps<T> + TensorAttention<T>> BertClassifier<T> {
         let hidden_states_copy = device.zeros(vec![sequence_length, hidden_dim])?;
         let hidden_states_attn_output = device.zeros(vec![sequence_length, hidden_dim])?;
         let intermediate_states = device.zeros(vec![sequence_length, intermediate_dim])?;
+        let q_cache = device.zeros(vec![num_heads, sequence_length, head_dim])?;
+        let k_cache = device.zeros(vec![num_heads, sequence_length, head_dim])?;
+        let v_cache = device.zeros(vec![num_heads, sequence_length, head_dim])?;
+        let qk = device.zeros(vec![num_heads, sequence_length, sequence_length])?;
+        let qkv = device.zeros(vec![num_heads, sequence_length, head_dim])?;
         let pool = device.zeros(vec![1, hidden_dim])?;
         let pool_output = device.zeros(vec![1, hidden_dim])?;
         let probs = device.zeros(vec![1, num_classes])?;
@@ -619,6 +634,11 @@ impl<T: Tensor + BertOps<T> + TensorAttention<T>> BertClassifier<T> {
             hidden_states_copy,
             hidden_states_attn_output,
             intermediate_states,
+            q_cache,
+            k_cache,
+            v_cache,
+            qk,
+            qkv,
             pool,
             pool_output,
             probs,
@@ -632,7 +652,7 @@ impl<T: Tensor + BertOps<T> + TensorAttention<T>> BertClassifier<T> {
         position_ids: Vec<usize>,
         type_ids: Vec<usize>,
     ) -> Result<T, SmeltError> {
-        let mut context = self.new_context(input_ids, position_ids, type_ids)?;
+        let mut context = self.new_context(input_ids, position_ids, type_ids, self.num_heads)?;
         self.forward(&mut context)?;
         Ok(context.probs)
     }
