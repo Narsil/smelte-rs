@@ -138,7 +138,7 @@ fn g_matmul<const TRANSPOSE: bool>(
                 batching,
             );
         }
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(feature = "rblas"))]

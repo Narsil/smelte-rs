@@ -1,5 +1,6 @@
+// use crate::cpu::f32::{Tensor as F32Tensor};
 #[cfg(feature = "cpu")]
-use crate::cpu::f32::{matmul, matmul_t, softmax, Tensor as F32Tensor};
+use crate::cpu::f32::Tensor as F32Tensor;
 
 #[cfg(feature = "cuda")]
 use crate::gpu::f32 as cuda_f32;
@@ -66,6 +67,7 @@ pub struct Gpt2Context<T: Tensor> {
     // - Used in the MLP to prevent cloning the skip connection
     // - Used in the attention for the output Linear layer
     hidden_states_copy: T,
+    past_key_values: PastKeyValues<T>,
     // Store the hidden_states after the attention (prevents a clone in the skip connection)
     hidden_states_attn_output: T,
     qkv_cache: T,
@@ -88,8 +90,10 @@ mod cpu {
         qkv_weights: &Linear<F32Tensor>,
         ctx: &mut Gpt2Context<F32Tensor>,
     ) -> Result<(), SmeltError> {
+        qkv_weights.forward(&ctx.hidden_states, &mut ctx.qkv_cache)?;
+        assert_eq!(ctx.past_key_values.len(), 1);
         todo!();
-        Ok(())
+        // Ok(())
     }
 
     impl TensorAttention<F32Tensor> for F32Tensor {
@@ -125,7 +129,7 @@ mod cuda {
     ) -> Result<(), SmeltError> {
         todo!("cuda gpt2");
 
-        Ok(())
+        // Ok(())
     }
     impl TensorAttention<F32CudaTensor> for F32CudaTensor {
         fn attention(
@@ -277,14 +281,6 @@ impl<T: Tensor + Gpt2Ops<T>> Gpt2Model<T> {
 
 /// TODO
 #[derive(Clone)]
-pub struct Gpt2Embeddings<T: Tensor> {
-    input_embeddings: Embedding<T>,
-    position_embeddings: Embedding<T>,
-    layer_norm: LayerNorm<T>,
-}
-
-/// TODO
-#[derive(Clone)]
 pub struct Gpt2<T: Tensor + Gpt2Ops<T>> {
     wte: Embedding<T>,
     wpe: Embedding<T>,
@@ -331,9 +327,9 @@ impl<T: Tensor + Gpt2Ops<T>> Gpt2<T> {
         debug!("position embeddings", ctx.hidden_states_copy);
         T::add(&ctx.hidden_states_copy, &mut ctx.hidden_states)?;
 
-        self.h.forward(ctx);
+        self.h.forward(ctx)?;
         self.ln_f.forward(&mut ctx.hidden_states)?;
-        self.lm_head.forward(&ctx.hidden_states, &mut ctx.probs);
+        self.lm_head.forward(&ctx.hidden_states, &mut ctx.probs)?;
         Ok(())
     }
 
@@ -372,6 +368,7 @@ impl<T: Tensor + Gpt2Ops<T>> Gpt2<T> {
             hidden_states_copy,
             hidden_states_attn_output,
             intermediate_states,
+            past_key_values,
             qkv_cache,
             probs,
         })
