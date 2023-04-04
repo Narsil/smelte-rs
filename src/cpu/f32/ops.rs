@@ -4,6 +4,9 @@ use crate::SmeltError;
 #[cfg(feature = "matrixmultiply")]
 use matrixmultiply::sgemm;
 
+#[cfg(feature = "rblas")]
+use rblas::{batched_sgemm, batched_sgemm_t};
+
 #[cfg(any(feature = "cblas", feature = "intel-mkl"))]
 use cblas_sys::{
     cblas_sgemm as sgemm, CblasColMajor as ColMajor, CblasNoTrans as NoTr,
@@ -105,6 +108,40 @@ fn g_matmul<const TRANSPOSE: bool>(
     let a_skip: usize = m * k;
     let b_skip: usize = n * k;
     let c_skip: usize = m * n;
+
+    #[cfg(feature = "rblas")]
+    unsafe {
+        if TRANSPOSE {
+            batched_sgemm_t(
+                a.data(),
+                a_skip,
+                b.data(),
+                b_skip,
+                c.data_mut(),
+                c_skip,
+                m,
+                n,
+                k,
+                batching,
+            );
+        } else {
+            println!("{m:?} {n:?} {k:?}");
+            println!("{a_skip:?} {b_skip:?} {c_skip:?}");
+            batched_sgemm(
+                a.data(),
+                a_skip,
+                b.data(),
+                b_skip,
+                c.data_mut(),
+                c_skip,
+                m,
+                n,
+                k,
+                batching,
+            );
+        }
+        return Ok(());
+    }
 
     let ar = k as isize;
     let ac = 1;
@@ -288,7 +325,7 @@ fn g_softmax<const CAUSAL: bool>(
             }
             for v in chunk.iter_mut() {
                 *v -= current_max;
-                *v = (*v).exp();
+                *v = exp(*v);
             }
             let mut sum = 0.0;
             for (j, &v) in chunk.iter().enumerate() {
@@ -349,10 +386,22 @@ pub fn faster_tanh(x: f32) -> f32 {
     a / (1.0 + (a * a)).sqrt()
 }
 
+#[cfg(feature = "fast_math")]
+#[inline]
+fn exp(x: f32) -> f32 {
+    fast_math::exp(x)
+}
+
+#[cfg(not(feature = "fast_math"))]
+#[inline]
+fn exp(x: f32) -> f32 {
+    x.exp()
+}
+
 /// utility function to use a faster but less precise tanh
 #[inline]
 pub fn inline_tanh(x: f32) -> f32 {
-    1.0 - (2.0 / (1.0 + (2.0 * x).exp()))
+    1.0 - (2.0 / (1.0 + exp(2.0 * x)))
 }
 
 /// `gelu` operation

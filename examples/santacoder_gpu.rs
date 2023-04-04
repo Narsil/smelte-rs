@@ -10,8 +10,8 @@ mod gpu {
     use smelte_rs::gpu::f32::{Device, Tensor};
     use smelte_rs::nn::layers::{Embedding, LayerNorm, Linear};
     use smelte_rs::nn::models::bert::{
-        Bert, BertAttention, BertClassifier, BertEmbeddings, BertEncoder, BertLayer, BertPooler,
-        Mlp,
+        Mlp, Santa, SantaAttention, SantaClassifier, SantaEmbeddings, SantaEncoder, SantaLayer,
+        SantaPooler,
     };
     use smelte_rs::SmeltError;
     use std::borrow::Cow;
@@ -21,7 +21,7 @@ mod gpu {
     use tokenizers::Tokenizer;
 
     #[derive(Debug, Error)]
-    pub enum BertError {
+    pub enum SantaError {
         #[error("i/o error")]
         IOError(#[from] std::io::Error),
         #[error("safetensor error")]
@@ -111,13 +111,13 @@ mod gpu {
         Embedding::new(to_tensor(weights, device).unwrap())
     }
 
-    impl<'a> FromSafetensors<'a> for BertClassifier<Tensor> {
+    impl<'a> FromSafetensors<'a> for SantaClassifier<Tensor> {
         fn from_tensors(tensors: &'a SafeTensors<'a>, device: &Device) -> Self
         where
             Self: Sized,
         {
-            let pooler = BertPooler::from_tensors(tensors, device);
-            let bert = Bert::from_tensors(tensors, device);
+            let pooler = SantaPooler::from_tensors(tensors, device);
+            let bert = Santa::from_tensors(tensors, device);
             let (weight, bias) = if let (Ok(weight), Ok(bias)) = (
                 tensors.tensor("classifier.weight"),
                 tensors.tensor("classifier.bias"),
@@ -133,7 +133,7 @@ mod gpu {
             Self::new(bert, pooler, classifier)
         }
     }
-    impl<'a> FromSafetensors<'a> for BertPooler<Tensor> {
+    impl<'a> FromSafetensors<'a> for SantaPooler<Tensor> {
         fn from_tensors(tensors: &'a SafeTensors<'a>, device: &Device) -> Self
         where
             Self: Sized,
@@ -147,18 +147,18 @@ mod gpu {
         }
     }
 
-    impl<'a> FromSafetensors<'a> for Bert<Tensor> {
+    impl<'a> FromSafetensors<'a> for Santa<Tensor> {
         fn from_tensors(tensors: &'a SafeTensors<'a>, device: &Device) -> Self
         where
             Self: Sized,
         {
-            let embeddings = BertEmbeddings::from_tensors(tensors, device);
-            let encoder = BertEncoder::from_tensors(tensors, device);
-            Bert::new(embeddings, encoder)
+            let embeddings = SantaEmbeddings::from_tensors(tensors, device);
+            let encoder = SantaEncoder::from_tensors(tensors, device);
+            Santa::new(embeddings, encoder)
         }
     }
 
-    impl<'a> FromSafetensors<'a> for BertEmbeddings<Tensor> {
+    impl<'a> FromSafetensors<'a> for SantaEmbeddings<Tensor> {
         fn from_tensors(tensors: &'a SafeTensors<'a>, device: &Device) -> Self
         where
             Self: Sized,
@@ -183,7 +183,7 @@ mod gpu {
             );
 
             let layer_norm = layer_norm_from_prefix("bert.embeddings.LayerNorm", &tensors, device);
-            BertEmbeddings::new(
+            SantaEmbeddings::new(
                 input_embeddings,
                 position_embeddings,
                 type_embeddings,
@@ -196,16 +196,16 @@ mod gpu {
         index: usize,
         tensors: &'a SafeTensors<'a>,
         device: &Device,
-    ) -> BertLayer<Tensor> {
+    ) -> SantaLayer<Tensor> {
         let attention = bert_attention_from_tensors(index, tensors, device);
         let mlp = bert_mlp_from_tensors(index, tensors, device);
-        BertLayer::new(attention, mlp)
+        SantaLayer::new(attention, mlp)
     }
     fn bert_attention_from_tensors<'a>(
         index: usize,
         tensors: &'a SafeTensors<'a>,
         device: &Device,
-    ) -> BertAttention<Tensor> {
+    ) -> SantaAttention<Tensor> {
         let query = linear_from_prefix(
             &format!("bert.encoder.layer.{index}.attention.self.query"),
             tensors,
@@ -231,7 +231,7 @@ mod gpu {
             &tensors,
             device,
         );
-        BertAttention::new(query, key, value, output, output_ln)
+        SantaAttention::new(query, key, value, output, output_ln)
     }
 
     fn bert_mlp_from_tensors<'a>(
@@ -285,7 +285,7 @@ mod gpu {
         }
     }
 
-    impl<'a> FromSafetensors<'a> for BertEncoder<Tensor> {
+    impl<'a> FromSafetensors<'a> for SantaEncoder<Tensor> {
         fn from_tensors(tensors: &'a SafeTensors<'a>, device: &Device) -> Self
         where
             Self: Sized,
@@ -308,7 +308,7 @@ mod gpu {
         number: u8,
     }
 
-    pub fn run() -> Result<(), BertError> {
+    pub fn run() -> Result<(), SantaError> {
         let start = std::time::Instant::now();
         let args = Args::parse();
         let string = args.prompt;
@@ -358,7 +358,7 @@ mod gpu {
 
         let device = Device::new(0).unwrap();
 
-        let mut bert = BertClassifier::from_tensors(&tensors, &device);
+        let mut bert = SantaClassifier::from_tensors(&tensors, &device);
         bert.set_num_heads(config.num_attention_heads);
 
         println!("Loaded {:?}", start.elapsed());
