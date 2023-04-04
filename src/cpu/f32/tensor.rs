@@ -41,7 +41,7 @@ impl Tensor {
     /// use smelte_rs::cpu::f32::Tensor;
     ///
     /// let tensor = Tensor::zeros(vec![2, 2]);
-    /// assert_eq!(tensor.cpu_data(), vec![0.0; 4]);
+    /// assert_eq!(tensor.cpu_data().unwrap(), vec![0.0; 4]);
     /// ```
     pub fn cpu_data(&self) -> Result<&[f32], SmeltError> {
         Ok(self.data.as_ref())
