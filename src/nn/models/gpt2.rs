@@ -90,9 +90,6 @@ mod cpu {
         qkv_weights: &LinearT<F32Tensor>,
         ctx: &mut Gpt2Context<F32Tensor>,
     ) -> Result<(), SmeltError> {
-        println!("{:?}", qkv_weights.weight().shape());
-        println!("{:?}", ctx.qkv_cache.shape());
-        println!("{:?}", ctx.hidden_states.shape());
         qkv_weights
             .forward(&ctx.hidden_states, &mut ctx.qkv_cache)
             .unwrap();
