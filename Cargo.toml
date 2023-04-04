@@ -31,7 +31,8 @@ rblas = { git = "https://github.com/Narsil/rblas", optional=true }
 [dev-dependencies]
 serde = { version = "1.0.152", features = ["serde_derive"] }
 serde_json = "1.0.91"
-safetensors = "0.3"
+# safetensors = "0.3"
+safetensors = { git = "https://github.com/huggingface/safetensors" }
 thiserror = "1.0"
 memmap2 = "0.5"
 tokenizers = { git = "https://github.com/huggingface/tokenizers", branch="main", default-features=false, features=["onig"] }
@@ -47,7 +48,3 @@ rblas = ["dep:rblas", "cpu"]
 intel-mkl = ["dep:cblas-sys", "cpu"]
 cuda = ["dep:cudarc", "dep:glob"]
 cpu = ["dep:fast-math"]
-
-
-[[example]]
-name = "bert"

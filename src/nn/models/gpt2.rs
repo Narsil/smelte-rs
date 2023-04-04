@@ -8,7 +8,7 @@ use crate::gpu::f32 as cuda_f32;
 #[cfg(feature = "cuda")]
 use crate::gpu::f32::Tensor as F32CudaTensor;
 
-use crate::nn::layers::{Embedding, LayerNorm, Linear, UnbiasedLinear};
+use crate::nn::layers::{Embedding, LayerNorm, LinearT, UnbiasedLinear};
 use crate::traits::{Device, Tensor, TensorOps};
 use crate::SmeltError;
 
@@ -65,7 +65,7 @@ pub struct Gpt2Context<T: Tensor> {
     hidden_states: T,
     // Required to compute position_ids before adding into hidden_states
     // - Used in the MLP to prevent cloning the skip connection
-    // - Used in the attention for the output Linear layer
+    // - Used in the attention for the output LinearT layer
     hidden_states_copy: T,
     past_key_values: PastKeyValues<T>,
     // Store the hidden_states after the attention (prevents a clone in the skip connection)
@@ -87,10 +87,15 @@ mod cpu {
     use super::*;
 
     fn attention(
-        qkv_weights: &Linear<F32Tensor>,
+        qkv_weights: &LinearT<F32Tensor>,
         ctx: &mut Gpt2Context<F32Tensor>,
     ) -> Result<(), SmeltError> {
-        qkv_weights.forward(&ctx.hidden_states, &mut ctx.qkv_cache)?;
+        println!("{:?}", qkv_weights.weight().shape());
+        println!("{:?}", ctx.qkv_cache.shape());
+        println!("{:?}", ctx.hidden_states.shape());
+        qkv_weights
+            .forward(&ctx.hidden_states, &mut ctx.qkv_cache)
+            .unwrap();
         assert_eq!(ctx.past_key_values.len(), 1);
         todo!();
         // Ok(())
@@ -98,7 +103,7 @@ mod cpu {
 
     impl TensorAttention<F32Tensor> for F32Tensor {
         fn attention(
-            qkv: &Linear<F32Tensor>,
+            qkv: &LinearT<F32Tensor>,
             ctx: &mut Gpt2Context<F32Tensor>,
         ) -> Result<(), SmeltError> {
             attention(qkv, ctx)?;
@@ -124,7 +129,7 @@ mod cuda {
     const RESHAPE_PTX: &str = include_str!(concat!(env!("OUT_DIR"), "/gpt2_reshape.ptx"));
 
     fn cuda_attention(
-        qkv: &Linear<F32CudaTensor>,
+        qkv: &LinearT<F32CudaTensor>,
         ctx: &mut Gpt2Context<F32CudaTensor>,
     ) -> Result<(), SmeltError> {
         todo!("cuda gpt2");
@@ -133,7 +138,7 @@ mod cuda {
     }
     impl TensorAttention<F32CudaTensor> for F32CudaTensor {
         fn attention(
-            qkv: &Linear<F32CudaTensor>,
+            qkv: &LinearT<F32CudaTensor>,
             ctx: &mut Gpt2Context<F32CudaTensor>,
         ) -> Result<(), SmeltError> {
             cuda_attention(qkv, ctx)?;
@@ -153,7 +158,7 @@ mod cuda {
 /// TODO
 pub trait TensorAttention<T: Tensor> {
     /// TODO
-    fn attention(qkv: &Linear<T>, ctx: &mut Gpt2Context<T>) -> Result<(), SmeltError>;
+    fn attention(qkv: &LinearT<T>, ctx: &mut Gpt2Context<T>) -> Result<(), SmeltError>;
 }
 
 /// TODO
@@ -168,19 +173,14 @@ pub trait Gpt2Ops<T: Tensor>: TensorOps<T> + TensorAttention<T> + TensorDebug<T>
 /// TODO
 #[derive(Clone)]
 pub struct Gpt2Attention<T: Tensor> {
-    qkv: Linear<T>,
-    output: Linear<T>,
-    output_ln: LayerNorm<T>,
+    qkv: LinearT<T>,
+    output: LinearT<T>,
 }
 
 impl<T: Tensor + Gpt2Ops<T>> Gpt2Attention<T> {
     /// TODO
-    pub fn new(qkv: Linear<T>, output: Linear<T>, output_ln: LayerNorm<T>) -> Self {
-        Self {
-            qkv,
-            output,
-            output_ln,
-        }
+    pub fn new(qkv: LinearT<T>, output: LinearT<T>) -> Self {
+        Self { qkv, output }
     }
 
     /// TODO
@@ -190,7 +190,6 @@ impl<T: Tensor + Gpt2Ops<T>> Gpt2Attention<T> {
         self.output
             .forward(&ctx.hidden_states_attn_output, &mut ctx.hidden_states_copy)?;
         T::add(&ctx.hidden_states_copy, &mut ctx.hidden_states)?;
-        self.output_ln.forward(&mut ctx.hidden_states)?;
         Ok(())
     }
 }
@@ -198,36 +197,27 @@ impl<T: Tensor + Gpt2Ops<T>> Gpt2Attention<T> {
 /// TODO
 #[derive(Clone)]
 pub struct Mlp<T: Tensor> {
-    intermediate: Linear<T>,
-    output: Linear<T>,
-    output_ln: LayerNorm<T>,
+    c_fc: LinearT<T>,
+    c_proj: LinearT<T>,
 }
 
 impl<T: Tensor + Gpt2Ops<T>> Mlp<T> {
     /// TODO
-    pub fn new(intermediate: Linear<T>, output: Linear<T>, output_ln: LayerNorm<T>) -> Self {
-        Self {
-            intermediate,
-            output,
-            output_ln,
-        }
+    pub fn new(c_fc: LinearT<T>, c_proj: LinearT<T>) -> Self {
+        Self { c_fc, c_proj }
     }
 
     /// TODO
     pub fn forward(&self, ctx: &mut Gpt2Context<T>) -> Result<(), SmeltError> {
         // println!("=====");
         debug!("Before MLP", ctx.hidden_states);
-        self.intermediate
+        self.c_fc
             .forward(&ctx.hidden_states, &mut ctx.intermediate_states)?;
         debug!("Intermediate ", ctx.intermediate_states);
         T::gelu(&mut ctx.intermediate_states)?;
         debug!("Intermediate (gelu)", ctx.intermediate_states);
-        self.output
-            .forward(&ctx.intermediate_states, &mut ctx.hidden_states_copy)?;
-        debug!("output", ctx.hidden_states_copy);
-        T::add(&ctx.hidden_states_copy, &mut ctx.hidden_states)?;
-        debug!("output (skip)", ctx.hidden_states);
-        self.output_ln.forward(&mut ctx.hidden_states)?;
+        self.c_proj
+            .forward(&ctx.intermediate_states, &mut ctx.hidden_states)?;
         debug!("output ln", ctx.hidden_states);
         Ok(())
     }
@@ -238,22 +228,36 @@ impl<T: Tensor + Gpt2Ops<T>> Mlp<T> {
 pub struct Gpt2Layer<T: Tensor> {
     attention: Gpt2Attention<T>,
     mlp: Mlp<T>,
+    ln_1: LayerNorm<T>,
+    ln_2: LayerNorm<T>,
 }
 
 impl<T: Tensor + Gpt2Ops<T>> Gpt2Layer<T> {
     /// TODO
-    pub fn new(attention: Gpt2Attention<T>, mlp: Mlp<T>) -> Self {
-        Self { attention, mlp }
+    pub fn new(
+        attention: Gpt2Attention<T>,
+        mlp: Mlp<T>,
+        ln_1: LayerNorm<T>,
+        ln_2: LayerNorm<T>,
+    ) -> Self {
+        Self {
+            attention,
+            mlp,
+            ln_1,
+            ln_2,
+        }
     }
 
     /// TODO
     pub fn forward(&self, ctx: &mut Gpt2Context<T>) -> Result<(), SmeltError> {
-        debug!("Before attention", ctx.hidden_states);
+        T::copy(&ctx.hidden_states, &mut ctx.hidden_states_copy)?;
+        self.ln_1.forward(&mut ctx.hidden_states)?;
         self.attention.forward(ctx)?;
-        debug!("After attention", ctx.hidden_states);
+        T::add(&ctx.hidden_states_copy, &mut ctx.hidden_states)?;
+        T::copy(&ctx.hidden_states, &mut ctx.hidden_states_copy)?;
+        self.ln_2.forward(&mut ctx.hidden_states)?;
         self.mlp.forward(ctx)?;
-        debug!("After mlp", ctx.hidden_states);
-        // println!("---------");
+        T::add(&ctx.hidden_states_copy, &mut ctx.hidden_states)?;
         Ok(())
     }
 }
@@ -309,6 +313,12 @@ impl<T: Tensor + Gpt2Ops<T>> Gpt2<T> {
             num_heads,
         }
     }
+
+    /// TODO
+    pub fn set_num_heads(&mut self, num_heads: usize) {
+        self.num_heads = num_heads;
+    }
+
     /// TODO
     pub fn forward(&self, ctx: &mut Gpt2Context<T>) -> Result<(), SmeltError> {
         let input_ids = &ctx.input_ids;
@@ -342,7 +352,7 @@ impl<T: Tensor + Gpt2Ops<T>> Gpt2<T> {
         let position_ids: Vec<_> = (0..input_ids.len()).collect();
         let vocab_size = self.wpe.weight().shape()[0];
         let hidden_dim = self.wpe.weight().shape()[1];
-        let intermediate_dim = self.h.layers[0].mlp.intermediate.weight().shape()[0];
+        let intermediate_dim = self.h.layers[0].mlp.c_fc.weight().shape()[0];
 
         let head_dim = hidden_dim / num_heads;
         let sequence_length = input_ids.len();

@@ -38,6 +38,12 @@ pub fn select(ids: &[usize], weights: &Tensor, out: &mut Tensor) -> Result<(), S
     Ok(())
 }
 
+/// Copy tensor into another tensor
+pub fn copy(weights: &Tensor, out: &mut Tensor) -> Result<(), SmeltError> {
+    out.data_mut().copy_from_slice(weights.data());
+    Ok(())
+}
+
 /// Regular matrix multiplication
 pub fn matmul(a: &Tensor, b: &Tensor, out: &mut Tensor) -> Result<(), SmeltError> {
     g_matmul::<false>(a, b, out)

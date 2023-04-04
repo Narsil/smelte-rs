@@ -47,9 +47,19 @@ impl<T: Tensor + TensorOps<T>> LinearT<T> {
 
     /// Forward pass
     pub fn forward(&self, tensor: &T, out: &mut T) -> Result<(), SmeltError> {
-        T::matmul_t(tensor, &self.weight, out)?;
+        T::matmul(tensor, &self.weight, out)?;
         T::broadcast_add(&self.bias, out)?;
         Ok(())
+    }
+
+    /// TODO
+    pub fn weight(&self) -> &T {
+        &self.weight
+    }
+
+    /// TODO
+    pub fn bias(&self) -> &T {
+        &self.bias
     }
 }
 

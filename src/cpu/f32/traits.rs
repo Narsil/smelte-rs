@@ -1,7 +1,7 @@
 use super::ops;
 use super::tensor::{Device, Tensor};
 use crate::traits::{
-    Device as DeviceTrait, Tensor as TensorTrait, TensorAdd, TensorGelu, TensorMatmul,
+    Device as DeviceTrait, Tensor as TensorTrait, TensorAdd, TensorCopy, TensorGelu, TensorMatmul,
     TensorMatmulT, TensorMul, TensorNormalize, TensorOps, TensorSelect, TensorSoftmax, TensorTanh,
 };
 use crate::SmeltError;
@@ -21,6 +21,12 @@ impl DeviceTrait for Device {
 
     fn zeros(&self, shape: Vec<usize>) -> Result<Self::Tensor, SmeltError> {
         Ok(Self::Tensor::zeros(shape))
+    }
+}
+
+impl TensorCopy<Tensor> for Tensor {
+    fn copy(src: &Self, dst: &mut Self) -> Result<(), SmeltError> {
+        ops::copy(src, dst)
     }
 }
 

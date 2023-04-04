@@ -20,7 +20,8 @@ pub trait Device {
 
 /// All common tensor operations
 pub trait TensorOps<T>:
-    TensorMatmul<T>
+    TensorCopy<T>
+    + TensorMatmul<T>
     + TensorMatmulT<T>
     + TensorAdd<T>
     + TensorMul<T>
@@ -30,6 +31,12 @@ pub trait TensorOps<T>:
     + TensorTanh<T>
     + TensorSoftmax<T>
 {
+}
+
+/// TODO
+pub trait TensorCopy<T> {
+    /// TODO
+    fn copy(src: &T, dst: &mut T) -> Result<(), SmeltError>;
 }
 
 /// TODO
