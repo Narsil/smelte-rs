@@ -57,3 +57,25 @@ extern "C" __global__ void attention_reshape(
         }
     }
 }
+
+extern "C" __global__ void attention_unsplit(
+    size_t numel,
+    size_t num_heads ,
+    size_t head_dim,
+    size_t sequence_length,
+    const float *qkv,
+    float *attn_out
+) {
+    size_t n = blockIdx.x * blockDim.x + threadIdx.x;
+    if (n >= numel) {
+        return;
+    }
+    const size_t hidden_dim = num_heads * head_dim;
+    const size_t q_length = hidden_dim * sequence_length;
+    const size_t k = n % head_dim;
+    const size_t j = (n / head_dim) % sequence_length;
+    const size_t i = n / head_dim / sequence_length;
+    const size_t qkv_index = j * head_dim * sequence_length + i * head_dim + k;
+    const size_t q_index = n;
+    attn_out[q_index] = qkv[qkv_index];
+}
