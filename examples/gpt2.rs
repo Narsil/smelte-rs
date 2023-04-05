@@ -11,10 +11,8 @@ use smelte_rs::cpu::f32::{Device, Tensor};
 #[cfg(feature = "cuda")]
 use smelte_rs::gpu::f32::{Device, Tensor};
 
-use smelte_rs::nn::layers::{Embedding, LayerNorm, Linear};
-use smelte_rs::nn::models::bert::{
-    Bert, BertAttention, BertClassifier, BertEmbeddings, BertEncoder, BertLayer, BertPooler, Mlp,
-};
+use smelte_rs::nn::layers::{Embedding, LayerNorm, LinearT, UnbiasedLinear};
+use smelte_rs::nn::models::gpt2::{Gpt2, Gpt2Attention, Gpt2Layer, Gpt2Model, Mlp};
 use smelte_rs::SmeltError;
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -23,7 +21,7 @@ use thiserror::Error;
 use tokenizers::Tokenizer;
 
 #[derive(Debug, Error)]
-pub enum BertError {
+pub enum Gpt2Error {
     #[error("i/o error")]
     IOError(#[from] std::io::Error),
     #[error("safetensor error")]
@@ -38,7 +36,7 @@ pub enum BertError {
 
 #[derive(Clone, Deserialize)]
 pub struct Config {
-    num_attention_heads: usize,
+    n_head: usize,
     id2label: Option<HashMap<String, String>>,
 }
 
@@ -98,18 +96,22 @@ fn linear_from<'a>(
     weights: TensorView<'a>,
     bias: TensorView<'a>,
     device: &Device,
-) -> Linear<Tensor> {
-    Linear::new(
+) -> LinearT<Tensor> {
+    LinearT::new(
         to_tensor(weights, device).unwrap(),
         to_tensor(bias, device).unwrap(),
     )
+}
+
+fn unbiased_linear_from<'a>(weights: TensorView<'a>, device: &Device) -> UnbiasedLinear<Tensor> {
+    UnbiasedLinear::new(to_tensor(weights, device).unwrap())
 }
 
 fn linear_from_prefix<'a>(
     prefix: &str,
     tensors: &'a SafeTensors<'a>,
     device: &Device,
-) -> Linear<Tensor> {
+) -> LinearT<Tensor> {
     linear_from(
         tensors.tensor(&format!("{}.weight", prefix)).unwrap(),
         tensors.tensor(&format!("{}.bias", prefix)).unwrap(),
@@ -121,150 +123,50 @@ fn embedding_from<'a>(weights: TensorView<'a>, device: &Device) -> Embedding<Ten
     Embedding::new(to_tensor(weights, device).unwrap())
 }
 
-impl<'a> FromSafetensors<'a> for BertClassifier<Tensor> {
+impl<'a> FromSafetensors<'a> for Gpt2<Tensor> {
     fn from_tensors(tensors: &'a SafeTensors<'a>, device: &Device) -> Self
     where
         Self: Sized,
     {
-        let pooler = BertPooler::from_tensors(tensors, device);
-        let bert = Bert::from_tensors(tensors, device);
-        let (weight, bias) = if let (Ok(weight), Ok(bias)) = (
-            tensors.tensor("classifier.weight"),
-            tensors.tensor("classifier.bias"),
-        ) {
-            (weight, bias)
-        } else {
-            (
-                tensors.tensor("cls.seq_relationship.weight").unwrap(),
-                tensors.tensor("cls.seq_relationship.bias").unwrap(),
-            )
-        };
-        let classifier = linear_from(weight, bias, device);
-        Self::new(bert, pooler, classifier)
-    }
-}
-impl<'a> FromSafetensors<'a> for BertPooler<Tensor> {
-    fn from_tensors(tensors: &'a SafeTensors<'a>, device: &Device) -> Self
-    where
-        Self: Sized,
-    {
-        let pooler = linear_from(
-            tensors.tensor("bert.pooler.dense.weight").unwrap(),
-            tensors.tensor("bert.pooler.dense.bias").unwrap(),
-            device,
-        );
-        Self::new(pooler)
+        let wte = embedding_from(tensors.tensor("wte.weight").unwrap(), device);
+        let wpe = embedding_from(tensors.tensor("wpe.weight").unwrap(), device);
+        let h = Gpt2Model::from_tensors(tensors, device);
+        let ln_f = layer_norm_from_prefix("ln_f", &tensors, device);
+        let lm_head = unbiased_linear_from(tensors.tensor("wte.weight").unwrap(), device);
+        // TODO number of heads
+        Gpt2::new(wte, wpe, h, ln_f, lm_head, 12)
     }
 }
 
-impl<'a> FromSafetensors<'a> for Bert<Tensor> {
-    fn from_tensors(tensors: &'a SafeTensors<'a>, device: &Device) -> Self
-    where
-        Self: Sized,
-    {
-        let embeddings = BertEmbeddings::from_tensors(tensors, device);
-        let encoder = BertEncoder::from_tensors(tensors, device);
-        Bert::new(embeddings, encoder)
-    }
-}
-
-impl<'a> FromSafetensors<'a> for BertEmbeddings<Tensor> {
-    fn from_tensors(tensors: &'a SafeTensors<'a>, device: &Device) -> Self
-    where
-        Self: Sized,
-    {
-        let input_embeddings = embedding_from(
-            tensors
-                .tensor("bert.embeddings.word_embeddings.weight")
-                .unwrap(),
-            device,
-        );
-        let position_embeddings = embedding_from(
-            tensors
-                .tensor("bert.embeddings.position_embeddings.weight")
-                .unwrap(),
-            device,
-        );
-        let type_embeddings = embedding_from(
-            tensors
-                .tensor("bert.embeddings.token_type_embeddings.weight")
-                .unwrap(),
-            device,
-        );
-
-        let layer_norm = layer_norm_from_prefix("bert.embeddings.LayerNorm", &tensors, device);
-        BertEmbeddings::new(
-            input_embeddings,
-            position_embeddings,
-            type_embeddings,
-            layer_norm,
-        )
-    }
-}
-
-fn bert_layer_from_tensors<'a>(
+fn gpt2_layer_from_tensors<'a>(
     index: usize,
     tensors: &'a SafeTensors<'a>,
     device: &Device,
-) -> BertLayer<Tensor> {
-    let attention = bert_attention_from_tensors(index, tensors, device);
-    let mlp = bert_mlp_from_tensors(index, tensors, device);
-    BertLayer::new(attention, mlp)
+) -> Gpt2Layer<Tensor> {
+    let ln_1 = layer_norm_from_prefix(&format!("h.{index}.ln_1"), tensors, device);
+    let ln_2 = layer_norm_from_prefix(&format!("h.{index}.ln_2"), tensors, device);
+    let attention = gpt2_attention_from_tensors(index, tensors, device);
+    let mlp = gpt2_mlp_from_tensors(index, tensors, device);
+    Gpt2Layer::new(attention, mlp, ln_1, ln_2)
 }
-fn bert_attention_from_tensors<'a>(
+fn gpt2_attention_from_tensors<'a>(
     index: usize,
     tensors: &'a SafeTensors<'a>,
     device: &Device,
-) -> BertAttention<Tensor> {
-    let query = linear_from_prefix(
-        &format!("bert.encoder.layer.{index}.attention.self.query"),
-        tensors,
-        device,
-    );
-    let key = linear_from_prefix(
-        &format!("bert.encoder.layer.{index}.attention.self.key"),
-        tensors,
-        device,
-    );
-    let value = linear_from_prefix(
-        &format!("bert.encoder.layer.{index}.attention.self.value"),
-        tensors,
-        device,
-    );
-    let output = linear_from_prefix(
-        &format!("bert.encoder.layer.{index}.attention.output.dense"),
-        tensors,
-        device,
-    );
-    let output_ln = layer_norm_from_prefix(
-        &format!("bert.encoder.layer.{index}.attention.output.LayerNorm"),
-        &tensors,
-        device,
-    );
-    BertAttention::new(query, key, value, output, output_ln)
+) -> Gpt2Attention<Tensor> {
+    let c_attn = linear_from_prefix(&format!("h.{index}.attn.c_attn"), tensors, device);
+    let c_proj = linear_from_prefix(&format!("h.{index}.attn.c_proj"), tensors, device);
+    Gpt2Attention::new(c_attn, c_proj)
 }
 
-fn bert_mlp_from_tensors<'a>(
+fn gpt2_mlp_from_tensors<'a>(
     index: usize,
     tensors: &'a SafeTensors<'a>,
     device: &Device,
 ) -> Mlp<Tensor> {
-    let intermediate = linear_from_prefix(
-        &format!("bert.encoder.layer.{index}.intermediate.dense"),
-        tensors,
-        device,
-    );
-    let output = linear_from_prefix(
-        &format!("bert.encoder.layer.{index}.output.dense"),
-        tensors,
-        device,
-    );
-    let output_ln = layer_norm_from_prefix(
-        &format!("bert.encoder.layer.{index}.output.LayerNorm"),
-        &tensors,
-        device,
-    );
-    Mlp::new(intermediate, output, output_ln)
+    let c_fc = linear_from_prefix(&format!("h.{index}.mlp.c_fc"), tensors, device);
+    let c_proj = linear_from_prefix(&format!("h.{index}.mlp.c_proj"), tensors, device);
+    Mlp::new(c_fc, c_proj)
 }
 
 fn layer_norm_from_prefix<'a>(
@@ -295,14 +197,14 @@ fn layer_norm_from_prefix<'a>(
     }
 }
 
-impl<'a> FromSafetensors<'a> for BertEncoder<Tensor> {
+impl<'a> FromSafetensors<'a> for Gpt2Model<Tensor> {
     fn from_tensors(tensors: &'a SafeTensors<'a>, device: &Device) -> Self
     where
         Self: Sized,
     {
         // TODO ! Count heads from tensors present
         let layers: Vec<_> = (0..12)
-            .map(|i| bert_layer_from_tensors(i, tensors, device))
+            .map(|i| gpt2_layer_from_tensors(i, tensors, device))
             .collect();
         Self::new(layers)
     }
@@ -318,13 +220,13 @@ struct Args {
     number: u8,
 }
 
-pub fn run() -> Result<(), BertError> {
+pub fn run() -> Result<(), Gpt2Error> {
     let start = std::time::Instant::now();
     let args = Args::parse();
     let string = args.prompt;
     let n = args.number;
 
-    let model_id = "Narsil/finbert";
+    let model_id = "Narsil/fast_gpt2";
 
     let model_id_slug = model_id.replace('/', "-");
 
@@ -372,8 +274,8 @@ pub fn run() -> Result<(), BertError> {
     #[cfg(feature = "cpu")]
     let device = Device {};
 
-    let mut bert = BertClassifier::from_tensors(&tensors, &device);
-    bert.set_num_heads(config.num_attention_heads);
+    let mut gpt2 = Gpt2::from_tensors(&tensors, &device);
+    gpt2.set_num_heads(config.n_head);
 
     println!("Loaded {:?}", start.elapsed());
 
@@ -383,12 +285,10 @@ pub fn run() -> Result<(), BertError> {
     println!("Loaded & encoded {:?}", start.elapsed());
 
     for _ in 0..n {
-        println!("Running bert inference on {string:?}");
+        println!("Running gpt2 inference on {string:?}");
         let inference_start = std::time::Instant::now();
         let input_ids: Vec<_> = encoded.get_ids().iter().map(|i| *i as usize).collect();
-        let position_ids: Vec<_> = (0..input_ids.len()).collect();
-        let type_ids: Vec<_> = encoded.get_type_ids().iter().map(|i| *i as usize).collect();
-        let probs = bert.run(input_ids, position_ids, type_ids).unwrap();
+        let probs = gpt2.run(input_ids).unwrap();
 
         let id2label = config.id2label();
         let mut outputs: Vec<_> = probs

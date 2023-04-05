@@ -4,6 +4,9 @@ use crate::SmeltError;
 #[cfg(feature = "matrixmultiply")]
 use matrixmultiply::sgemm;
 
+#[cfg(feature = "rblas")]
+use rblas::{batched_sgemm, batched_sgemm_t};
+
 #[cfg(any(feature = "cblas", feature = "intel-mkl"))]
 use cblas_sys::{
     cblas_sgemm as sgemm, CblasColMajor as ColMajor, CblasNoTrans as NoTr,
@@ -32,6 +35,12 @@ pub fn select(ids: &[usize], weights: &Tensor, out: &mut Tensor) -> Result<(), S
         out.data_mut()[data_offset..data_offset + hidden_dim]
             .copy_from_slice(&weights.data()[weight_offset..weight_offset + hidden_dim]);
     }
+    Ok(())
+}
+
+/// Copy tensor into another tensor
+pub fn copy(weights: &Tensor, out: &mut Tensor) -> Result<(), SmeltError> {
+    out.data_mut().copy_from_slice(weights.data());
     Ok(())
 }
 
@@ -106,76 +115,111 @@ fn g_matmul<const TRANSPOSE: bool>(
     let b_skip: usize = n * k;
     let c_skip: usize = m * n;
 
-    let ar = k as isize;
-    let ac = 1;
-    let (br, bc) = if TRANSPOSE {
-        (1, b.shape()[dim - 1] as isize)
-    } else {
-        (b.shape()[dim - 1] as isize, 1)
-    };
-    let cr = n as isize;
-    let cc = 1;
-
-    (0..batching).for_each(|step| {
-        let ap = &a.data()[step * a_skip..];
-        let bp = &b.data()[step * b_skip..];
-        let cp = &mut c.data_mut()[step * c_skip..];
-
-        #[cfg(feature = "matrixmultiply")]
-        unsafe {
-            sgemm(
+    #[cfg(feature = "rblas")]
+    unsafe {
+        if TRANSPOSE {
+            batched_sgemm_t(
+                a.data(),
+                a_skip,
+                b.data(),
+                b_skip,
+                c.data_mut(),
+                c_skip,
                 m,
-                k,
                 n,
-                1.0,
-                ap.as_ptr(),
-                ar,
-                ac,
-                bp.as_ptr(),
-                br,
-                bc,
-                1.0,
-                cp.as_mut_ptr(),
-                cr,
-                cc,
+                k,
+                batching,
+            );
+        } else {
+            batched_sgemm(
+                a.data(),
+                a_skip,
+                b.data(),
+                b_skip,
+                c.data_mut(),
+                c_skip,
+                m,
+                n,
+                k,
+                batching,
             );
         }
+        Ok(())
+    }
 
-        #[cfg(any(feature = "cblas", feature = "intel-mkl"))]
-        unsafe {
-            let (m, n, k) = (m as libc::c_int, n as libc::c_int, k as libc::c_int);
-            let (layout, a_tr, b_tr, lda, ldb, ldc) = if cr < cc {
-                let (lda, a_tr) = if ar < ac { (m, NoTr) } else { (k, Tr) };
-                let (ldb, b_tr) = if br < bc { (k, NoTr) } else { (n, Tr) };
-                (ColMajor, a_tr, b_tr, lda, ldb, m)
-            } else {
-                let (lda, a_tr) = if ar < ac { (m, Tr) } else { (k, NoTr) };
-                let (ldb, b_tr) = if br < bc { (k, Tr) } else { (n, NoTr) };
-                (RowMajor, a_tr, b_tr, lda, ldb, n)
-            };
-            sgemm(
-                layout,
-                a_tr,
-                b_tr,
-                m,
-                n,
-                k,
-                1.0,
-                ap.as_ptr(),
-                lda,
-                // a_skip as i32,
-                bp.as_ptr(),
-                ldb,
-                // b_skip as i32,
-                1.0,
-                cp.as_mut_ptr(),
-                ldc,
-                // c_skip as i32,
-                // batching as i32,
-            )
-        }
-    });
-    Ok(())
+    #[cfg(not(feature = "rblas"))]
+    {
+        let ar = k as isize;
+        let ac = 1;
+        let (br, bc) = if TRANSPOSE {
+            (1, b.shape()[dim - 1] as isize)
+        } else {
+            (b.shape()[dim - 1] as isize, 1)
+        };
+        let cr = n as isize;
+        let cc = 1;
+
+        (0..batching).for_each(|step| {
+            let ap = &a.data()[step * a_skip..];
+            let bp = &b.data()[step * b_skip..];
+            let cp = &mut c.data_mut()[step * c_skip..];
+
+            #[cfg(feature = "matrixmultiply")]
+            unsafe {
+                sgemm(
+                    m,
+                    k,
+                    n,
+                    1.0,
+                    ap.as_ptr(),
+                    ar,
+                    ac,
+                    bp.as_ptr(),
+                    br,
+                    bc,
+                    1.0,
+                    cp.as_mut_ptr(),
+                    cr,
+                    cc,
+                );
+            }
+
+            #[cfg(any(feature = "cblas", feature = "intel-mkl"))]
+            unsafe {
+                let (m, n, k) = (m as libc::c_int, n as libc::c_int, k as libc::c_int);
+                let (layout, a_tr, b_tr, lda, ldb, ldc) = if cr < cc {
+                    let (lda, a_tr) = if ar < ac { (m, NoTr) } else { (k, Tr) };
+                    let (ldb, b_tr) = if br < bc { (k, NoTr) } else { (n, Tr) };
+                    (ColMajor, a_tr, b_tr, lda, ldb, m)
+                } else {
+                    let (lda, a_tr) = if ar < ac { (m, Tr) } else { (k, NoTr) };
+                    let (ldb, b_tr) = if br < bc { (k, Tr) } else { (n, NoTr) };
+                    (RowMajor, a_tr, b_tr, lda, ldb, n)
+                };
+                sgemm(
+                    layout,
+                    a_tr,
+                    b_tr,
+                    m,
+                    n,
+                    k,
+                    1.0,
+                    ap.as_ptr(),
+                    lda,
+                    // a_skip as i32,
+                    bp.as_ptr(),
+                    ldb,
+                    // b_skip as i32,
+                    1.0,
+                    cp.as_mut_ptr(),
+                    ldc,
+                    // c_skip as i32,
+                    // batching as i32,
+                )
+            }
+        });
+        Ok(())
+    }
 }
 
 /// tensor elementwise addition. b += a.
@@ -288,7 +332,7 @@ fn g_softmax<const CAUSAL: bool>(
             }
             for v in chunk.iter_mut() {
                 *v -= current_max;
-                *v = (*v).exp();
+                *v = exp(*v);
             }
             let mut sum = 0.0;
             for (j, &v) in chunk.iter().enumerate() {
@@ -349,10 +393,22 @@ pub fn faster_tanh(x: f32) -> f32 {
     a / (1.0 + (a * a)).sqrt()
 }
 
+#[cfg(feature = "fast_math")]
+#[inline]
+fn exp(x: f32) -> f32 {
+    fast_math::exp(x)
+}
+
+#[cfg(not(feature = "fast_math"))]
+#[inline]
+fn exp(x: f32) -> f32 {
+    x.exp()
+}
+
 /// utility function to use a faster but less precise tanh
 #[inline]
 pub fn inline_tanh(x: f32) -> f32 {
-    1.0 - (2.0 / (1.0 + (2.0 * x).exp()))
+    1.0 - (2.0 / (1.0 + exp(2.0 * x)))
 }
 
 /// `gelu` operation
