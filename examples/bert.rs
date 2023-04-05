@@ -359,7 +359,7 @@ pub fn run() -> Result<(), BertError> {
     if !std::path::Path::new(&filename).exists() {
         println!(
             r#"Config not found, try downloading it with \n
-    `curl https://huggingface.co//resolve/main/config.json -o config-{model_id_slug}.json -L`
+    `curl https://huggingface.co/{model_id}/resolve/main/config.json -o config-{model_id_slug}.json -L`
     "#
         );
     }
