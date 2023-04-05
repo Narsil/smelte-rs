@@ -645,6 +645,7 @@ impl<T: Tensor + Gpt2Ops<T>> Gpt2<T> {
 
     /// TODO
     pub fn run(&self, input_ids: Vec<usize>, new_tokens: usize) -> Result<Vec<usize>, SmeltError> {
+        #[cfg(feature = "cuda")]
         profiler_start()?;
         let mut context = self.new_context(input_ids, self.num_heads)?;
         for _ in 0..new_tokens {
@@ -654,6 +655,7 @@ impl<T: Tensor + Gpt2Ops<T>> Gpt2<T> {
             println!("Took {:?}", start.elapsed());
         }
         let tokens = context.new_tokens();
+        #[cfg(feature = "cuda")]
         profiler_stop()?;
         tokens
     }
