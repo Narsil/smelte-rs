@@ -138,7 +138,7 @@ impl<T: Tensor> Gpt2Context<T> {
         })
     }
     /// TODO
-    pub fn next(&mut self) -> Result<(), SmeltError> {
+    pub fn generate(&mut self) -> Result<(), SmeltError> {
         let past_length = self.past_key_values[0].key.shape()[1];
         let position_ids: Vec<_> = vec![past_length + 1];
         let hidden_dim = self.hidden_states.shape()[1];
@@ -148,13 +148,6 @@ impl<T: Tensor> Gpt2Context<T> {
         let intermediate_dim = self.intermediate_states.shape()[1];
         let vocab_size = self.probs.shape()[1];
         let sequence_length = 1;
-        let num_layers = self.past_key_values.len();
-        let past_key_values: Result<PastKeyValues<T>, _> = (0..num_layers)
-            .map(|_| -> Result<PastKeyValue<T>, _> {
-                PastKeyValue::new(num_heads, past_length, head_dim, device)
-            })
-            .collect();
-        let past_key_values = past_key_values?;
 
         let hidden_states = device.zeros(vec![sequence_length, hidden_dim])?;
         let hidden_states_copy = device.zeros(vec![sequence_length, hidden_dim])?;
@@ -655,13 +648,12 @@ impl<T: Tensor + Gpt2Ops<T>> Gpt2<T> {
         for _ in 0..new_tokens {
             let start = std::time::Instant::now();
             self.forward(&mut context)?;
-            context.next();
+            context.generate()?;
             // println!("past {:?}", context.past_key_values[0].key.shape());
             println!("Took {:?}", start.elapsed());
         }
-        let tokens = context.new_tokens();
         #[cfg(feature = "cuda")]
         profiler_stop()?;
-        tokens
+        context.new_tokens()
     }
 }
