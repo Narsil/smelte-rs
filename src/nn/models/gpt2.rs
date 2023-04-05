@@ -617,9 +617,11 @@ impl<T: Tensor + Gpt2Ops<T>> Gpt2<T> {
         debug!("position embeddings", ctx.hidden_states_copy);
         T::add(&ctx.hidden_states_copy, &mut ctx.hidden_states)?;
 
+        let start = std::time::Instant::now();
         self.h.forward(ctx)?;
         self.ln_f.forward(&mut ctx.hidden_states)?;
         self.lm_head.forward(&ctx.hidden_states, &mut ctx.probs)?;
+        println!("Loop {:?}", start.elapsed());
         Ok(())
     }
 
@@ -654,7 +656,7 @@ impl<T: Tensor + Gpt2Ops<T>> Gpt2<T> {
             let start = std::time::Instant::now();
             self.forward(&mut context)?;
             context.next();
-            println!("past {:?}", context.past_key_values[0].key.shape());
+            // println!("past {:?}", context.past_key_values[0].key.shape());
             println!("Took {:?}", start.elapsed());
         }
         let tokens = context.new_tokens();
