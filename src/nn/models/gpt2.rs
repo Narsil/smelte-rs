@@ -396,6 +396,8 @@ mod cuda {
         qkv.forward(&ctx.hidden_states, &mut ctx.qkv)?;
 
         split_qkv(ctx, i)?;
+        ctx.past_key_values[i].key = ctx.k.clone();
+        ctx.past_key_values[i].value = ctx.v.clone();
         matmul_t(&ctx.q, &ctx.k, &mut ctx.qk).unwrap();
         let hidden_dim = ctx.qkv.shape()[1];
         let num_heads = ctx.q.shape()[0];
@@ -652,6 +654,7 @@ impl<T: Tensor + Gpt2Ops<T>> Gpt2<T> {
             let start = std::time::Instant::now();
             self.forward(&mut context)?;
             context.next();
+            println!("past {:?}", context.past_key_values[0].key.shape());
             println!("Took {:?}", start.elapsed());
         }
         let tokens = context.new_tokens();
