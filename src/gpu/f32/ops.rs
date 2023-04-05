@@ -79,7 +79,7 @@ pub fn select(ids: &[usize], weights: &Tensor, out: &mut Tensor) -> Result<(), S
 
 /// Copy tensor into another tensor
 pub fn copy(weights: &Tensor, out: &mut Tensor) -> Result<(), SmeltError> {
-    out.device().dtod_copy(weights.data(), out.data_mut())?;
+    weights.device().dtod_copy(weights.data(), out.data_mut())?;
     Ok(())
 }
 

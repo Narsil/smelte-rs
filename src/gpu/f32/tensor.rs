@@ -32,6 +32,14 @@ impl Device {
     }
 }
 
+impl std::ops::Deref for Device {
+    type Target = Arc<CudaDevice>;
+    /// TODO
+    fn deref(&self) -> &Self::Target {
+        &self.device
+    }
+}
+
 impl Tensor {
     /// The shape of the tensor
     /// ```
