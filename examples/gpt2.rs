@@ -15,7 +15,6 @@ use smelte_rs::nn::layers::{Embedding, LayerNorm, LinearT, UnbiasedLinear};
 use smelte_rs::nn::models::gpt2::{Gpt2, Gpt2Attention, Gpt2Layer, Gpt2Model, Mlp};
 use smelte_rs::SmeltError;
 use std::borrow::Cow;
-use std::collections::HashMap;
 use std::fs::File;
 use thiserror::Error;
 use tokenizers::Tokenizer;
@@ -37,19 +36,6 @@ pub enum Gpt2Error {
 #[derive(Clone, Deserialize)]
 pub struct Config {
     n_head: usize,
-    id2label: Option<HashMap<String, String>>,
-}
-
-impl Config {
-    pub fn id2label(&self) -> Option<&HashMap<String, String>> {
-        self.id2label.as_ref()
-    }
-}
-
-pub fn get_label(id2label: Option<&HashMap<String, String>>, i: usize) -> Option<String> {
-    let id2label: &HashMap<String, String> = id2label?;
-    let label: String = id2label.get(&format!("{}", i))?.to_string();
-    Some(label)
 }
 
 pub trait FromSafetensors<'a> {
@@ -123,19 +109,13 @@ fn embedding_from<'a>(weights: TensorView<'a>, device: &Device) -> Embedding<Ten
     Embedding::new(to_tensor(weights, device).unwrap())
 }
 
-impl<'a> FromSafetensors<'a> for Gpt2<Tensor> {
-    fn from_tensors(tensors: &'a SafeTensors<'a>, device: &Device) -> Self
-    where
-        Self: Sized,
-    {
-        let wte = embedding_from(tensors.tensor("wte.weight").unwrap(), device);
-        let wpe = embedding_from(tensors.tensor("wpe.weight").unwrap(), device);
-        let h = Gpt2Model::from_tensors(tensors, device);
-        let ln_f = layer_norm_from_prefix("ln_f", &tensors, device);
-        let lm_head = unbiased_linear_from(tensors.tensor("wte.weight").unwrap(), device);
-        // TODO number of heads
-        Gpt2::new(wte, wpe, h, ln_f, lm_head, 12)
-    }
+fn gpt2_from_tensors(tensors: &SafeTensors, device: &Device, num_heads: usize) -> Gpt2<Tensor> {
+    let wte = embedding_from(tensors.tensor("wte.weight").unwrap(), device);
+    let wpe = embedding_from(tensors.tensor("wpe.weight").unwrap(), device);
+    let h = Gpt2Model::from_tensors(tensors, device);
+    let ln_f = layer_norm_from_prefix("ln_f", &tensors, device);
+    let lm_head = unbiased_linear_from(tensors.tensor("wte.weight").unwrap(), device);
+    Gpt2::new(wte, wpe, h, ln_f, lm_head, num_heads)
 }
 
 fn gpt2_layer_from_tensors<'a>(
@@ -156,7 +136,7 @@ fn gpt2_attention_from_tensors<'a>(
 ) -> Gpt2Attention<Tensor> {
     let c_attn = linear_from_prefix(&format!("h.{index}.attn.c_attn"), tensors, device);
     let c_proj = linear_from_prefix(&format!("h.{index}.attn.c_proj"), tensors, device);
-    Gpt2Attention::new(c_attn, c_proj)
+    Gpt2Attention::new(c_attn, c_proj, index)
 }
 
 fn gpt2_mlp_from_tensors<'a>(
@@ -216,8 +196,8 @@ struct Args {
     #[arg(short, long, default_value_t = String::from("Stocks rallied and the British pound gained"))]
     prompt: String,
     /// Number of times to run the prompt
-    #[arg(short, long, default_value_t = 1)]
-    number: u8,
+    #[arg(short, long, default_value_t = 10)]
+    number: usize,
 }
 
 pub fn run() -> Result<(), Gpt2Error> {
@@ -274,8 +254,7 @@ pub fn run() -> Result<(), Gpt2Error> {
     #[cfg(feature = "cpu")]
     let device = Device {};
 
-    let mut gpt2 = Gpt2::from_tensors(&tensors, &device);
-    gpt2.set_num_heads(config.n_head);
+    let gpt2 = gpt2_from_tensors(&tensors, &device, config.n_head);
 
     println!("Loaded {:?}", start.elapsed());
 
@@ -284,24 +263,21 @@ pub fn run() -> Result<(), Gpt2Error> {
 
     println!("Loaded & encoded {:?}", start.elapsed());
 
-    for _ in 0..n {
-        println!("Running gpt2 inference on {string:?}");
-        let inference_start = std::time::Instant::now();
-        let input_ids: Vec<_> = encoded.get_ids().iter().map(|i| *i as usize).collect();
-        let probs = gpt2.run(input_ids).unwrap();
+    println!("Running gpt2 inference on {string:?}");
+    let inference_start = std::time::Instant::now();
+    let input_ids: Vec<_> = encoded.get_ids().iter().map(|i| *i as usize).collect();
+    let probs = gpt2.run(input_ids, n).unwrap();
 
-        let id2label = config.id2label();
-        let mut outputs: Vec<_> = probs
-            .cpu_data()
-            .unwrap()
-            .iter()
-            .enumerate()
-            .map(|(i, &p)| (get_label(id2label, i).unwrap_or(format!("LABEL_{}", i)), p))
-            .collect();
-        outputs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-        println!("Probs {:?}", outputs);
-        println!("Inference in {:?}", inference_start.elapsed());
-    }
+    // let id2label = config.id2label();
+    // let mut outputs: Vec<_> = probs
+    //     .cpu_data()
+    //     .unwrap()
+    //     .iter()
+    //     .enumerate()
+    //     .map(|(i, &p)| (get_label(id2label, i).unwrap_or(format!("LABEL_{}", i)), p))
+    //     .collect();
+    // outputs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+    // println!("Probs {:?}", outputs);
     println!("Total Inference {:?}", start.elapsed());
     Ok(())
 }

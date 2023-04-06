@@ -84,6 +84,8 @@ impl Tensor {
     /// ```
     pub fn zeros(shape: Vec<usize>, device: &Device) -> Result<Self, DriverError> {
         let nelement: usize = shape.iter().product();
+        // Cannot alloc zero, so we always allocate at least 1
+        let nelement = std::cmp::max(1, nelement);
         let data: CudaSlice<f32> = device.device.alloc_zeros(nelement)?;
         Ok(Self {
             shape,
